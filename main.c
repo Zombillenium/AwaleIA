@@ -1,18 +1,17 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 
 // === Structures ===
 typedef struct Plateau {
-    int caseN;          // Numéro de la case
-    int R;              // Graines rouges
-    int B;              // Graines bleues
-    int T;              // Graines transparentes
-    struct Plateau* caseSuiv;  // Pointeur vers la case suivante (cercle)
+    int caseN;
+    int R;
+    int B;
+    int T;
+    struct Plateau* caseSuiv;
 } Plateau;
 
 // === Fonctions utilitaires ===
-
-// Création du plateau circulaire
 Plateau* creer_plateau(int nb_cases) {
     Plateau* premiere = NULL;
     Plateau* precedente = NULL;
@@ -25,12 +24,12 @@ Plateau* creer_plateau(int nb_cases) {
         }
 
         nouvelle->caseN = i + 1;
-        nouvelle->R = 4;
-        nouvelle->B = 4;
-        nouvelle->T = 4;
+        nouvelle->R = 2;
+        nouvelle->B = 2;
+        nouvelle->T = 2;
         nouvelle->caseSuiv = NULL;
 
-        if (precedente != NULL)
+        if (precedente)
             precedente->caseSuiv = nouvelle;
         else
             premiere = nouvelle;
@@ -38,11 +37,10 @@ Plateau* creer_plateau(int nb_cases) {
         precedente = nouvelle;
     }
 
-    precedente->caseSuiv = premiere; // boucle
+    precedente->caseSuiv = premiere;
     return premiere;
 }
 
-// Affichage du plateau
 void afficher_plateau(Plateau* plateau, int nb_cases) {
     Plateau* p = plateau;
     printf("\n=== État du plateau ===\n");
@@ -55,7 +53,6 @@ void afficher_plateau(Plateau* plateau, int nb_cases) {
     printf("-------------------------\n\n");
 }
 
-// Trouver une case donnée par numéro
 Plateau* trouver_case(Plateau* plateau, int num) {
     Plateau* p = plateau;
     do {
@@ -65,7 +62,6 @@ Plateau* trouver_case(Plateau* plateau, int num) {
     return NULL;
 }
 
-// Retourne la case précédente (dans le cercle)
 Plateau* case_precedente(Plateau* plateau, Plateau* cible, int nb_cases) {
     Plateau* p = plateau;
     while (p->caseSuiv != cible) {
@@ -74,15 +70,10 @@ Plateau* case_precedente(Plateau* plateau, Plateau* cible, int nb_cases) {
     return p;
 }
 
-// === Règles de jeu ===
-
-// Vérifie si une case appartient au joueur (1 -> impair, 2 -> pair)
 int case_du_joueur(int caseN, int joueur) {
-    if (joueur == 1) return (caseN % 2 == 1);
-    else return (caseN % 2 == 0);
+    return (joueur == 1) ? (caseN % 2 == 1) : (caseN % 2 == 0);
 }
 
-// Fonction de capture
 int capturer(Plateau* plateau, Plateau* derniere, int nb_cases, int joueur) {
     int total_capture = 0;
     Plateau* courante = derniere;
@@ -101,57 +92,42 @@ int capturer(Plateau* plateau, Plateau* derniere, int nb_cases, int joueur) {
     return total_capture;
 }
 
-// Distribution
-Plateau* distribuer(Plateau* plateau, Plateau* depart, int couleur, int joueur, int nb_cases) {
+Plateau* distribuer(Plateau* plateau, Plateau* depart, int couleur, int joueur, int nb_cases, int mode_transp) {
     Plateau* courante = depart;
     int graines = 0;
 
-    // Déterminer le nombre de graines à distribuer
-    if (couleur == 1) { // rouge
+    if (couleur == 1) {
         graines = depart->R;
         depart->R = 0;
-    } else if (couleur == 2) { // bleue
+    } else if (couleur == 2) {
         graines = depart->B;
         depart->B = 0;
-    } else if (couleur == 3) { // transparente
+    } else if (couleur == 3) {
         graines = depart->T;
         depart->T = 0;
     }
 
     Plateau* derniere = NULL;
+
     while (graines > 0) {
         courante = courante->caseSuiv;
-
-        // Ne pas distribuer dans la case de départ
         if (courante == depart) continue;
 
-        // Rouge : distribue dans toutes les cases
         if (couleur == 1) {
             courante->R++;
             graines--;
-        }
-        // Bleue : distribue seulement dans les cases adverses
-        else if (couleur == 2) {
+        } else if (couleur == 2) {
             if (!case_du_joueur(courante->caseN, joueur)) {
                 courante->B++;
                 graines--;
             }
-        }
-        // Transparente : choix du comportement
-        else if (couleur == 3) {
-            // On demande au joueur le mode
-            int choix;
-            printf("Choisis le mode de distribution des transparentes (1=Rouge / 2=Bleue): ");
-            scanf("%d", &choix);
-            // D’abord distribuer les transparentes selon le choix
-            if (choix == 1) {
+        } else if (couleur == 3) {
+            if (mode_transp == 1) { // joue comme rouge
                 courante->T++;
                 graines--;
-            } else {
-                if (!case_du_joueur(courante->caseN, joueur)) {
-                    courante->T++;
-                    graines--;
-                }
+            } else if (mode_transp == 2 && !case_du_joueur(courante->caseN, joueur)) { // joue comme bleue
+                courante->T++;
+                graines--;
             }
         }
 
@@ -161,7 +137,7 @@ Plateau* distribuer(Plateau* plateau, Plateau* depart, int couleur, int joueur, 
     return derniere;
 }
 
-// === Fonction principale ===
+// === MAIN ===
 int main() {
     int nb_cases = 16;
     Plateau* plateau = creer_plateau(nb_cases);
@@ -174,31 +150,44 @@ int main() {
 
     while (1) {
         printf("Tour de %s\n", joueurs[tour]);
-        int num_case, couleur;
+        char entree[10];
+        int num_case = 0;
+        int couleur = 0;
+        int mode_transp = 0;
 
-        // Choisir une case
-        do {
-            printf("Choisis une case (1-16) appartenant à %s : ", joueurs[tour]);
-            scanf("%d", &num_case);
-        } while (!case_du_joueur(num_case, tour + 1));
+        printf("Entre ton coup (ex : 16B, 8R, 3TB, 5TR) : ");
+        scanf("%s", entree);
+
+        // Analyse de la chaîne
+        int i = 0;
+        while (isdigit(entree[i])) i++;
+        num_case = atoi(entree);
+
+        if (entree[i] == 'R' || entree[i] == 'r') couleur = 1;
+        else if (entree[i] == 'B' || entree[i] == 'b') couleur = 2;
+        else if (entree[i] == 'T' || entree[i] == 't') {
+            couleur = 3;
+            i++;
+            if (entree[i] == 'R' || entree[i] == 'r') mode_transp = 1;
+            else if (entree[i] == 'B' || entree[i] == 'b') mode_transp = 2;
+        }
 
         Plateau* c = trouver_case(plateau, num_case);
+        if (!c || !case_du_joueur(num_case, tour + 1)) {
+            printf("Case invalide pour ce joueur.\n");
+            continue;
+        }
 
-        // Choisir la couleur
-        printf("Choisis une couleur à jouer : 1=Rouge  2=Bleue  3=Transparente : ");
-        scanf("%d", &couleur);
-
-        Plateau* derniere = distribuer(plateau, c, couleur, tour + 1, nb_cases);
+        Plateau* derniere = distribuer(plateau, c, couleur, tour + 1, nb_cases, mode_transp);
         int captures = capturer(plateau, derniere, nb_cases, tour + 1);
         scores[tour] += captures;
 
         printf("%s a capturé %d graines.\n", joueurs[tour], captures);
         afficher_plateau(plateau, nb_cases);
-
         printf("Scores -> J1: %d | J2: %d\n", scores[0], scores[1]);
         printf("----------------------------------------\n");
 
-        tour = 1 - tour; // Changement de joueur
+        tour = 1 - tour;
     }
 
     return 0;
