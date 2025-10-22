@@ -2,6 +2,17 @@
 #include <stdlib.h>
 #include "plateau.h"
 
+void liberer_plateau(Plateau* plateau, int nb_cases) {
+    if (!plateau) return;
+    Plateau* p = plateau;
+    Plateau* suivant;
+    for (int i = 0; i < nb_cases; i++) {
+        suivant = p->caseSuiv;
+        free(p);
+        p = suivant;
+    }
+}
+
 Plateau* creer_plateau(int nb_cases) {
     Plateau* premiere = NULL;
     Plateau* precedente = NULL;
@@ -46,12 +57,35 @@ Plateau* trouver_case(Plateau* plateau, int num) {
     return NULL;
 }
 
-Plateau* case_precedente(Plateau* plateau, Plateau* cible) {
+Plateau* case_precedente(Plateau* plateau, Plateau* cible, int nb_cases) {
     Plateau* p = plateau;
-    while (p->caseSuiv != cible) p = p->caseSuiv;
+    while (p->caseSuiv != cible) {
+        p = p->caseSuiv;
+    }
     return p;
 }
 
 int case_du_joueur(int caseN, int joueur) {
     return (joueur == 1) ? (caseN % 2 == 1) : (caseN % 2 == 0);
+}
+
+int total_graines(Plateau* plateau, int nb_cases) {
+    int total = 0;
+    Plateau* p = plateau;
+    for (int i = 0; i < nb_cases; i++) {
+        total += p->R + p->B + p->T;
+        p = p->caseSuiv;
+    }
+    return total;
+}
+
+int total_graines_joueur(Plateau* plateau, int nb_cases, int joueur) {
+    int total = 0;
+    Plateau* p = plateau;
+    for (int i = 0; i < nb_cases; i++) {
+        if (case_du_joueur(p->caseN, joueur))
+            total += p->R + p->B + p->T;
+        p = p->caseSuiv;
+    }
+    return total;
 }
