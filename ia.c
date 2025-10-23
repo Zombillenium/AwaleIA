@@ -66,11 +66,19 @@ void trier_cases_par_valeur(Plateau* plateau, int nb_cases, int* ordre, int* val
 
 // Enregistre un killer move lors d'une coupe beta
 void enregistrer_killer_move(int profondeur, Coup coup) {
-    if (killer_moves[profondeur][0].case_depart != coup.case_depart) {
-        killer_moves[profondeur][1] = killer_moves[profondeur][0];
-        killer_moves[profondeur][0] = coup;
-    }
+    Coup *k0 = &killer_moves[profondeur][0];
+    Coup *k1 = &killer_moves[profondeur][1];
+
+    // Vérifie si le coup existe déjà
+    if (k0->case_depart == coup.case_depart &&
+        k0->couleur == coup.couleur &&
+        k0->mode_transp == coup.mode_transp) return;
+
+    // Décale
+    *k1 = *k0;
+    *k0 = coup;
 }
+
 
 
 
@@ -117,6 +125,7 @@ void tester_killer_moves(Plateau* plateau, int joueur, int joueur_actuel,
 
 
 int minimax(Plateau* plateau, int joueur, int profondeur, int alpha, int beta, int maximisant) {
+
     int nb_cases = 16;
 
     unsigned long long key = hash_plateau(plateau, nb_cases);
@@ -124,9 +133,9 @@ int minimax(Plateau* plateau, int joueur, int profondeur, int alpha, int beta, i
     if (chercher_transpo(joueur, key, profondeur, &val_cache)) return val_cache;
 
     if (profondeur == 0) {
-        int eval = (joueur == 1)
-            ? evaluer_plateau(plateau, joueur)
-            : evaluer_plateau_famine(plateau, joueur);
+        int eval = (joueur  == 1)
+            ? evaluer_plateau(plateau, joueur )
+            : evaluer_plateau_famine(plateau, joueur );
         ajouter_transpo(joueur, key, profondeur, eval);
         return eval;
     }
@@ -195,57 +204,3 @@ FIN_COUPE:
 
 
 
-
-
-
-void meilleur_coup(Plateau* plateau, int joueur) {
-    int nb_cases = 16;
-    int meilleur_score = -9999;
-    int best_case = -1, best_color = -1, best_mode = 0;
-
-    Plateau* p = plateau;
-    for (int i = 0; i < nb_cases; i++) {
-        if (!case_du_joueur(p->caseN, joueur)) {
-            p = p->caseSuiv; continue;
-        }
-
-        int couleurs[3] = {1, 2, 3};
-        for (int c = 0; c < 3; c++) {
-            int couleur = couleurs[c];
-            if ((couleur == 1 && p->R == 0) ||
-                (couleur == 2 && p->B == 0) ||
-                (couleur == 3 && p->T == 0))
-                continue;
-
-            int modes[2] = {1, 2};
-            int nb_modes = (couleur == 3) ? 2 : 1;
-
-            for (int m = 0; m < nb_modes; m++) {
-                Plateau* copie = copier_plateau(plateau, nb_cases);
-                Plateau* case_copie = trouver_case(copie, p->caseN);
-                Plateau* derniere = distribuer(case_copie, couleur, joueur,
-                                               (couleur == 3 ? modes[m] : 0));
-
-                int captures = capturer(copie, derniere, nb_cases);
-                int score = evaluer_plateau(copie, joueur) + captures * 5;
-
-                if (score > meilleur_score) {
-                    meilleur_score = score;
-                    best_case = p->caseN;
-                    best_color = couleur;
-                    best_mode = (couleur == 3 ? modes[m] : 0);
-                }
-                liberer_plateau(copie, nb_cases);
-            }
-        }
-        p = p->caseSuiv;
-    }
-
-    printf("\n👉 Meilleur coup pour %s : ", (joueur == 1 ? "J1" : "J2"));
-    if (best_case == -1) { printf("aucun coup possible\n"); return; }
-
-    if (best_color == 1) printf("%dR (score %d)\n", best_case, meilleur_score);
-    else if (best_color == 2) printf("%dB (score %d)\n", best_case, meilleur_score);
-    else if (best_color == 3 && best_mode == 1) printf("%dTR (score %d)\n", best_case, meilleur_score);
-    else if (best_color == 3 && best_mode == 2) printf("%dTB (score %d)\n", best_case, meilleur_score);
-}

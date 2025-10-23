@@ -115,8 +115,8 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
 
     double duree_derniere = 0.0;
     int profondeur_finale = 1;
-
-    for (int d = 1; d <= 15; d++) {
+    Move best_previous = {-1, -1, 0};
+    for (int d = 1; d <= 25; d++) {
 
         Move moves[16 * 3 * 2];
         int nmoves = 0;
@@ -129,9 +129,24 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
                 if (p->T > 0) {
                     moves[nmoves++] = (Move){p->caseN, 3, 1};
                     moves[nmoves++] = (Move){p->caseN, 3, 2};
+
                 }
             }
             p = p->caseSuiv;
+        }
+        // Si un meilleur coup précédent existe, on le met en tête
+        if (best_previous.caseN != -1) {
+            for (int i = 0; i < nmoves; i++) {
+                if (moves[i].caseN == best_previous.caseN &&
+                    moves[i].couleur == best_previous.couleur &&
+                    moves[i].mode == best_previous.mode) {
+                    // on le met à la position 0
+                    Move temp = moves[0];
+                    moves[0] = moves[i];
+                    moves[i] = temp;
+                    break;
+                }
+            }
         }
         if (nmoves == 0) return 0;
 
@@ -180,6 +195,7 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
         else if (*best_color == 3 && *best_mode == 2) printf("%dTB", *best_case);
         printf(" (score %d)\n", meilleur_score_local);
         fflush(stdout);
+        best_previous = (Move){*best_case, *best_color, *best_mode};
 
         // ⏱️ Estimation : si prochaine profondeur ~6× plus longue dépasse 2 s, on arrête
         if (duree_derniere * 8.0 >= TEMPS_MAX) {
