@@ -1,7 +1,9 @@
 #include "tabletranspo.h"
 #include <string.h>
 
-Entry transpo_table[HASH_SIZE];
+Entry transpo_table_J1[HASH_SIZE];
+Entry transpo_table_J2[HASH_SIZE];
+
 
 unsigned long long hash_plateau(Plateau* plateau, int nb_cases) {
     unsigned long long h = 1469598103934665603ULL; // FNV offset basis
@@ -16,25 +18,36 @@ unsigned long long hash_plateau(Plateau* plateau, int nb_cases) {
     return h;
 }
 
-int chercher_transpo(unsigned long long key, int profondeur, int* score_out) {
+int chercher_transpo(int joueur, unsigned long long key, int profondeur, int* score_out) {
+    Entry* table = (joueur == 1) ? transpo_table_J1 : transpo_table_J2;
     unsigned int idx = key % HASH_SIZE;
-    if (transpo_table[idx].valid &&
-        transpo_table[idx].key == key &&
-        transpo_table[idx].depth >= profondeur) {
-        *score_out = transpo_table[idx].score;
-        return 1; // trouvé
+
+    if (table[idx].valid &&
+        table[idx].key == key &&
+        table[idx].depth >= profondeur) {
+        *score_out = table[idx].score;
+        return 1;
     }
     return 0;
 }
 
-void ajouter_transpo(unsigned long long key, int profondeur, int score) {
+void ajouter_transpo(int joueur, unsigned long long key, int profondeur, int score) {
+    Entry* table = (joueur == 1) ? transpo_table_J1 : transpo_table_J2;
     unsigned int idx = key % HASH_SIZE;
-    transpo_table[idx].key = key;
-    transpo_table[idx].depth = profondeur;
-    transpo_table[idx].score = score;
-    transpo_table[idx].valid = 1;
+    table[idx].key = key;
+    table[idx].depth = profondeur;
+    table[idx].score = score;
+    table[idx].valid = 1;
 }
 
-void vider_transpo() {
-    memset(transpo_table, 0, sizeof(transpo_table));
+void vider_transpo_joueur(int joueur) {
+    if (joueur == 1)
+        memset(transpo_table_J1, 0, sizeof(transpo_table_J1));
+    else
+        memset(transpo_table_J2, 0, sizeof(transpo_table_J2));
+}
+
+void vider_toutes_transpos() {
+    memset(transpo_table_J1, 0, sizeof(transpo_table_J1));
+    memset(transpo_table_J2, 0, sizeof(transpo_table_J2));
 }

@@ -1,5 +1,7 @@
 {
     "files.associations": {
-        "plateau.h": "c"
+        "plateau.h": "c",
+        "tabletranspo.h": "c",
+        "evaluation.h": "c"
     }
 }

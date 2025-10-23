@@ -3,7 +3,7 @@
 
 #include "plateau.h"
 
-#define HASH_SIZE 200003  // grand nombre premier, ajustable
+#define HASH_SIZE 50000  // ou ce que tu utilises
 
 typedef struct {
     unsigned long long key;
@@ -12,18 +12,10 @@ typedef struct {
     int valid;
 } Entry;
 
-extern Entry transpo_table[HASH_SIZE];
-
-// Génère une clé unique pour un plateau
 unsigned long long hash_plateau(Plateau* plateau, int nb_cases);
-
-// Cherche une entrée dans la table
-int chercher_transpo(unsigned long long key, int profondeur, int* score_out);
-
-// Ajoute une entrée
-void ajouter_transpo(unsigned long long key, int profondeur, int score);
-
-// Réinitialise la table (utile avant une partie)
-void vider_transpo();
+int chercher_transpo(int joueur, unsigned long long key, int profondeur, int* score_out);
+void ajouter_transpo(int joueur, unsigned long long key, int profondeur, int score);
+void vider_transpo_joueur(int joueur);
+void vider_toutes_transpos();
 
 #endif
