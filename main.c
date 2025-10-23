@@ -4,6 +4,12 @@
 #include "plateau.h"
 #include "jeu.h"
 #include "ia.h"
+#include <time.h>
+#include <sys/time.h>
+
+#define TEMPS_MAX 2.0  // en secondes
+
+
 
 // Fonctions utilitaires (si non déjà présentes)
 int total_graines(Plateau* plateau, int nb_cases);
@@ -40,47 +46,119 @@ int main() {
         int best_color = -1;
         int best_mode = 0;
 
-        Plateau* p = plateau;
-        for (int i = 0; i < nb_cases; i++) {
-            if (case_du_joueur(p->caseN, joueur)) {
-                int couleurs[3] = {1, 2, 3};
-                for (int c = 0; c < 3; c++) {
-                    int couleur = couleurs[c];
-                    if ((couleur == 1 && p->R == 0) ||
-                        (couleur == 2 && p->B == 0) ||
-                        (couleur == 3 && p->T == 0))
-                        continue;
+        // 🔹 Profondeur initiale et gestion du temps (pour le joueur du tour)
+        int profondeur = 1;
+        int profondeur_max = 15;
+        double duree_totale = 0.0;
+        struct timeval debut_global, courant;
 
-                    int modes[2] = {1, 2};
-                    int nb_modes = (couleur == 3) ? 2 : 1;
+        gettimeofday(&debut_global, NULL);  // chrono global
+        int profondeur_finale = profondeur;
+        vider_transpo(); // on vide la table de transposition pour ce tour
 
-                    for (int m = 0; m < nb_modes; m++) {
-                        Plateau* copie = copier_plateau(plateau, nb_cases);
-                        Plateau* case_copie = trouver_case(copie, p->caseN);
-                        Plateau* derniere = distribuer(case_copie, couleur, joueur,
-                                                       (couleur == 3 ? modes[m] : 0));
 
-                        int captures = capturer(copie, derniere, nb_cases);
+        // Approfondissement progressif (4 → 15 ou jusqu’à 2s)
+        for (int d = profondeur; d <= profondeur_max; d++) {
+            int meilleur_score_temp = -9999;
+            int best_case_temp = -1;
+            int best_color_temp = -1;
+            int best_mode_temp = 0;
+            int coups_eval = 0;
 
-                        int score;
-                        if (joueur == 1)
-                            score = minimax(copie, joueur, 5, -100000, 100000, 1);
-                        else
-                            score = minimax(copie, joueur, 5, -100000, 100000, 1);
+            Plateau* p = plateau;
+            for (int i = 0; i < nb_cases; i++) {
+                if (case_du_joueur(p->caseN, joueur)) {
+                    int couleurs[3] = {1, 2, 3};
+                    for (int c = 0; c < 3; c++) {
+                        int couleur = couleurs[c];
+                        if ((couleur == 1 && p->R == 0) ||
+                            (couleur == 2 && p->B == 0) ||
+                            (couleur == 3 && p->T == 0))
+                            continue;
 
-                        if (score > meilleur_score) {
-                            meilleur_score = score;
-                            best_case = p->caseN;
-                            best_color = couleur;
-                            best_mode = (couleur == 3 ? modes[m] : 0);
+                        int modes[2] = {1, 2};
+                        int nb_modes = (couleur == 3) ? 2 : 1;
+
+                        for (int m = 0; m < nb_modes; m++) {
+                            Plateau* copie = copier_plateau(plateau, nb_cases);
+                            Plateau* case_copie = trouver_case(copie, p->caseN);
+                            Plateau* derniere = distribuer(case_copie, couleur, joueur,
+                                                        (couleur == 3 ? modes[m] : 0));
+                            int captures = capturer(copie, derniere, nb_cases);
+
+                            int s = minimax(copie, joueur, d, -100000, 100000, 1);
+                            s += captures * 5;
+
+                            if (s > meilleur_score_temp) {
+                                meilleur_score_temp = s;
+                                best_case_temp = p->caseN;
+                                best_color_temp = couleur;
+                                best_mode_temp = (couleur == 3 ? modes[m] : 0);
+                            }
+
+                            coups_eval++;
+                            liberer_plateau(copie, nb_cases);
+
+                            // Vérifie le chrono global
+                            gettimeofday(&courant, NULL);
+                            duree_totale = (courant.tv_sec - debut_global.tv_sec) +
+                                        (courant.tv_usec - debut_global.tv_usec) / 1000000.0;
+                            if (duree_totale >= TEMPS_MAX && coups_eval > 0) {
+                                printf("⏱️ Temps écoulé (%.3fs), arrêt immédiat à profondeur %d.\n",
+                                    duree_totale, d);
+                                goto FIN_TEMPS;
+                            }
                         }
-
-                        liberer_plateau(copie, nb_cases);
                     }
                 }
+                p = p->caseSuiv;
             }
-            p = p->caseSuiv;
+
+            // ⚠️ Si aucun coup valide trouvé à cette profondeur
+            if (best_case_temp == -1) {
+                printf("❌ Aucune solution trouvée à la profondeur %d, arrêt.\n", d);
+                break;  // on s'arrête et garde la dernière solution connue
+            }
+
+            // ✅ Si la profondeur est terminée normalement
+            profondeur_finale = d;
+            meilleur_score = meilleur_score_temp;
+            best_case = best_case_temp;
+            best_color = best_color_temp;
+            best_mode = best_mode_temp;
+
+            gettimeofday(&courant, NULL);
+            duree_totale = (courant.tv_sec - debut_global.tv_sec) +
+                        (courant.tv_usec - debut_global.tv_usec) / 1000000.0;
+
+            // 🔍 Affichage du meilleur coup trouvé à cette profondeur
+            printf("🔹 Profondeur %d terminée en %.3fs | Meilleur coup : ", d, duree_totale);
+            if (best_color_temp == 1)
+                printf("%dR", best_case_temp);
+            else if (best_color_temp == 2)
+                printf("%dB", best_case_temp);
+            else if (best_color_temp == 3 && best_mode_temp == 1)
+                printf("%dTR", best_case_temp);
+            else if (best_color_temp == 3 && best_mode_temp == 2)
+                printf("%dTB", best_case_temp);
+
+            printf(" (score %d)\n", meilleur_score_temp);
+            fflush(stdout);
+
+            // Stop si le temps max est atteint
+            if (duree_totale >= TEMPS_MAX) {
+                printf("⏱️ Temps limite atteint après profondeur %d.\n", d);
+                break;
+            }
         }
+
+        FIN_TEMPS:
+        printf("✅ Profondeur finale retenue : %d (%.3fs)\n",
+            profondeur_finale, duree_totale);
+        fflush(stdout);
+
+
+
 
         if (best_case == -1) {
             printf("⚠️  Aucun coup possible pour %s.\n", joueurs[tour]);
