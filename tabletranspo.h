@@ -17,5 +17,6 @@ int chercher_transpo(int joueur, unsigned long long key, int profondeur, int* sc
 void ajouter_transpo(int joueur, unsigned long long key, int profondeur, int score);
 void vider_transpo_joueur(int joueur);
 void vider_toutes_transpos();
+void initialiser_transpo_lock();
 
 #endif

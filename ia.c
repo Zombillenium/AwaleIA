@@ -6,9 +6,19 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
+#define MAX_PROFONDEUR 32
+#define MAX_KILLERS 2
 
+// ✅ killer_moves déclaré UNE SEULE FOIS ici, dans ia.c
 static Coup killer_moves[MAX_PROFONDEUR][MAX_KILLERS];
+
+#ifdef _OPENMP
+#pragma omp threadprivate(killer_moves)
+#endif
 
 // =============================
 // SECTION 1 : OUTILS GÉNÉRAUX

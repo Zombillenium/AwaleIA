@@ -2,6 +2,10 @@
     "files.associations": {
         "plateau.h": "c",
         "tabletranspo.h": "c",
-        "evaluation.h": "c"
+        "evaluation.h": "c",
+        "omp.h": "c",
+        "stdio.h": "c",
+        "stdlib.h": "c",
+        "time.h": "c"
     }
 }

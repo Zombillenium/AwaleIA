@@ -6,6 +6,8 @@
 #include "plateau.h"
 #include "jeu.h"
 #include "ia.h"
+#include <omp.h>
+
 
 #define TEMPS_MAX 2.0  // Temps max par coup (en secondes)
 
@@ -21,6 +23,12 @@ typedef struct {
     int nb_cases;
 } Partie;
 
+typedef struct {
+    int caseN;
+    int couleur;  // 1=R, 2=B, 3=T
+    int mode;     // pour T: 1=TR, 2=TB; sinon 0
+} Move;
+
 // --- Fonctions ---
 void initialiser_partie(Partie* partie);
 int jouer_tour(Partie* partie);
@@ -34,8 +42,10 @@ void executer_coup(Partie* partie, int joueur, int best_case, int best_color, in
 // ============================
 
 int main() {
+    printf("💻 OpenMP détecte %d threads disponibles.\n", omp_get_max_threads());
     Partie partie;
     initialiser_partie(&partie);
+    initialiser_transpo_lock();
 
     printf("=== Début du match IA vs IA ===\n");
     afficher_plateau(partie.plateau, partie.nb_cases);
@@ -87,97 +97,104 @@ int jouer_tour(Partie* partie) {
 }
 
 int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_color, int* best_mode) {
-    int nb_cases = partie->nb_cases;
+    const int nb_cases = partie->nb_cases;
     Plateau* plateau = partie->plateau;
-    struct timeval debut, courant;
-    gettimeofday(&debut, NULL);
 
-    int meilleur_score = -9999;
+    struct timeval debut, courant;
+    gettimeofday(&debut, NULL); // chrono global
+
+    omp_set_nested(0);
+    omp_set_dynamic(0);
+
+    #ifdef _OPENMP
+    #pragma omp parallel
+    {
+        initialiser_killer_moves();
+    }
+    #endif
+
+    double duree_derniere = 0.0;
     int profondeur_finale = 1;
-    double duree_totale = 0.0;
 
     for (int d = 1; d <= 15; d++) {
-        int meilleur_score_temp = -9999;
-        int best_case_temp = -1, best_color_temp = -1, best_mode_temp = 0;
-        int coups_eval = 0;
 
+        Move moves[16 * 3 * 2];
+        int nmoves = 0;
         Plateau* p = plateau;
+
         for (int i = 0; i < nb_cases; i++) {
-            if (!case_du_joueur(p->caseN, joueur)) { p = p->caseSuiv; continue; }
-            int couleurs[3] = {1, 2, 3};
-            for (int c = 0; c < 3; c++) {
-                int couleur = couleurs[c];
-                if ((couleur == 1 && p->R == 0) ||
-                    (couleur == 2 && p->B == 0) ||
-                    (couleur == 3 && p->T == 0))
-                    continue;
-
-                int modes[2] = {1, 2};
-                int nb_modes = (couleur == 3) ? 2 : 1;
-
-                for (int m = 0; m < nb_modes; m++) {
-                    Plateau* copie = copier_plateau(plateau, nb_cases);
-                    Plateau* case_copie = trouver_case(copie, p->caseN);
-                    Plateau* derniere = distribuer(case_copie, couleur, joueur,
-                                                   (couleur == 3 ? modes[m] : 0));
-                    int captures = capturer(copie, derniere, nb_cases);
-
-                    int s = minimax(copie, joueur, d, -100000, 100000, 1);
-                    s += captures * 5;
-                    coups_eval++;
-
-                    if (s > meilleur_score_temp) {
-                        meilleur_score_temp = s;
-                        best_case_temp = p->caseN;
-                        best_color_temp = couleur;
-                        best_mode_temp = (couleur == 3 ? modes[m] : 0);
-                    }
-
-                    liberer_plateau(copie, nb_cases);
-                    gettimeofday(&courant, NULL);
-                    duree_totale = (courant.tv_sec - debut.tv_sec) +
-                                   (courant.tv_usec - debut.tv_usec) / 1000000.0;
-                    if (duree_totale >= TEMPS_MAX && coups_eval > 0)
-                        goto FIN_TEMPS;
+            if (case_du_joueur(p->caseN, joueur)) {
+                if (p->R > 0) moves[nmoves++] = (Move){p->caseN, 1, 0};
+                if (p->B > 0) moves[nmoves++] = (Move){p->caseN, 2, 0};
+                if (p->T > 0) {
+                    moves[nmoves++] = (Move){p->caseN, 3, 1};
+                    moves[nmoves++] = (Move){p->caseN, 3, 2};
                 }
             }
             p = p->caseSuiv;
         }
+        if (nmoves == 0) return 0;
 
-        if (best_case_temp != -1) {
-            profondeur_finale = d;
-            meilleur_score = meilleur_score_temp;
-            *best_case = best_case_temp;
-            *best_color = best_color_temp;
-            *best_mode = best_mode_temp;
+        int best_case_temp = -1, best_color_temp = -1, best_mode_temp = 0;
+        int meilleur_score_local = -999999;
+
+        struct timeval t1, t2;
+        gettimeofday(&t1, NULL);
+
+        #pragma omp parallel for schedule(dynamic,1) reduction(max:meilleur_score_local)
+        for (int k = 0; k < nmoves; k++) {
+            Move mv = moves[k];
+            Plateau* copie = copier_plateau(plateau, nb_cases);
+            Plateau* case_copie = trouver_case(copie, mv.caseN);
+            Plateau* derniere = distribuer(case_copie, mv.couleur, joueur,
+                                           (mv.couleur == 3 ? mv.mode : 0));
+            int captures = capturer(copie, derniere, nb_cases);
+            int score = minimax(copie, joueur, d, -100000, 100000, 1) + captures * 5;
+
+            #pragma omp critical
+            {
+                if (score > meilleur_score_local) {
+                    meilleur_score_local = score;
+                    best_case_temp  = mv.caseN;
+                    best_color_temp = mv.couleur;
+                    best_mode_temp  = (mv.couleur == 3 ? mv.mode : 0);
+                }
+            }
+            liberer_plateau(copie, nb_cases);
         }
 
-        gettimeofday(&courant, NULL);
-        duree_totale = (courant.tv_sec - debut.tv_sec) +
-                       (courant.tv_usec - debut.tv_usec) / 1000000.0;
+        gettimeofday(&t2, NULL);
+        double duree = (t2.tv_sec - t1.tv_sec) +
+                       (t2.tv_usec - t1.tv_usec) / 1000000.0;
+        duree_derniere = duree;
 
-        printf("🔹 Profondeur %d terminée en %.3fs | Meilleur coup : ", d, duree_totale);
+        *best_case = best_case_temp;
+        *best_color = best_color_temp;
+        *best_mode = best_mode_temp;
+        profondeur_finale = d;
 
-        if (*best_color == 1)
-            printf("%dR", *best_case);
-        else if (*best_color == 2)
-            printf("%dB", *best_case);
-        else if (*best_color == 3 && *best_mode == 1)
-            printf("%dTR", *best_case);
-        else if (*best_color == 3 && *best_mode == 2)
-            printf("%dTB", *best_case);
-
-        printf("\n");
+        printf("🔹 Profondeur %d terminée en %.3fs | Meilleur coup : ", d, duree);
+        if (*best_color == 1) printf("%dR", *best_case);
+        else if (*best_color == 2) printf("%dB", *best_case);
+        else if (*best_color == 3 && *best_mode == 1) printf("%dTR", *best_case);
+        else if (*best_color == 3 && *best_mode == 2) printf("%dTB", *best_case);
+        printf(" (score %d)\n", meilleur_score_local);
         fflush(stdout);
 
-
-        if (duree_totale >= TEMPS_MAX) break;
+        // ⏱️ Estimation : si prochaine profondeur ~6× plus longue dépasse 2 s, on arrête
+        if (duree_derniere * 8.0 >= TEMPS_MAX) {
+            printf("⏱️  Prochaine profondeur estimée à %.3fs (>%.1fs) → arrêt anticipé.\n",
+                   duree_derniere * 8.0, TEMPS_MAX);
+            break;
+        }
     }
 
-FIN_TEMPS:
-    printf("✅ Profondeur finale retenue : %d (%.3fs)\n", profondeur_finale, duree_totale);
+    printf("✅ Profondeur finale retenue : %d\n", profondeur_finale);
     return (*best_case != -1);
 }
+
+
+
 
 
 void executer_coup(Partie* partie, int joueur, int best_case, int best_color, int best_mode) {

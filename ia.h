@@ -5,9 +5,6 @@
 #include "tabletranspo.h"
 #include "jeu.h"
 
-// Profondeur maximale de recherche
-#define MAX_PROFONDEUR 32
-#define MAX_KILLERS 2
 
 // --- Fonctions principales ---
 void meilleur_coup(Plateau* plateau, int joueur);

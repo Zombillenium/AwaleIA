@@ -23,7 +23,7 @@ OBJ = $(SRC:.c=.o)
 all: release
 
 # === Mode release (optimisé) ===
-release: CFLAGS += -s  # supprime les symboles de debug pour un exécutable plus léger
+release: CFLAGS = -Wall -Wextra -std=c11 -O3 -march=native -flto -funroll-loops -DNDEBUG -pipe -s -fopenmp
 release: $(EXEC)
 
 # === Mode debug (avec infos gdb et sans optimisations) ===
