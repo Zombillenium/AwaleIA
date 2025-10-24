@@ -1,16 +1,10 @@
 #include "evaluation.h"
-#include "plateau.h"
-#include <stdlib.h> // pour rand()
+#include "plateau.h"  
 
-// ===============================
-// IA CLASSIQUE (équilibrée)
-// ===============================
 int evaluer_plateau(Plateau* plateau, int joueur) {
     int totalJ = 0, totalA = 0;
     int transJ = 0, transA = 0;
-    int captJ = 0, captA = 0;
-    int coupsJ = 0, coupsA = 0;
-    int casesVidesJ = 0, casesVidesA = 0;
+    int casesCapturablesJ = 0, casesCapturablesA = 0;
 
     Plateau* p = plateau;
     do {
@@ -18,62 +12,36 @@ int evaluer_plateau(Plateau* plateau, int joueur) {
         if (case_du_joueur(p->caseN, joueur)) {
             totalJ += total;
             transJ += p->T;
-            if (total > 0) coupsJ++;
-            if (total == 0) casesVidesJ++;
-            if (total == 2 || total == 3) captJ++;
+            if (total == 2 || total == 3)
+                casesCapturablesJ++;
         } else {
             totalA += total;
             transA += p->T;
-            if (total > 0) coupsA++;
-            if (total == 0) casesVidesA++;
-            if (total == 2 || total == 3) captA++;
+            if (total == 2 || total == 3)
+                casesCapturablesA++;
         }
         p = p->caseSuiv;
     } while (p != plateau);
 
-    // Phase de jeu : 0 = début, 1 = fin
-    float phase = 1.0f - ((float)(totalJ + totalA) / 48.0f);
+    // pondération simple
     float score = 0.0f;
+    score += 3.0f * totalJ;                            // graines totales du joueur
+    score -= 2.0f * totalA;                            // graines de l’adversaire
+    score += 5.0f * (casesCapturablesJ - casesCapturablesA);
+    score += 1.0f * (transJ - transA);
 
-    // === stratégie principale ===
-    score += (3.0f + 2.0f * phase) * (totalJ - totalA);         // avantage en graines
-    score += (5.0f + 3.0f * phase) * (captJ - captA);           // captures
-    score += 1.0f * (transJ - transA);                          // transitions
-    score += 3.0f * (coupsJ - coupsA);                          // mobilité
-    score -= 2.0f * (casesVidesJ - casesVidesA);                // vides = instabilité
+    // mise à l’échelle dans [1, 1000]
+    if (score < -200.0f) score = -200.0f;
+    if (score > 200.0f)  score = 200.0f;
 
-    // === sécurité personnelle ===
-    if (totalJ <= 6) score -= (30 - 3 * totalJ);
-    if (coupsJ <= 2) score -= 25;
-    if (casesVidesJ >= 6) score -= 20;
-
-    // === pression sur l’adversaire ===
-    if (totalA <= 6) score += (30 - 3 * totalA);
-    if (coupsA <= 2) score += 25;
-    if (casesVidesA >= 6) score += 20;
-
-    // === bonus d’équilibre global (fin de partie) ===
-    if ((totalJ + totalA) < 30) score += 5.0f;
-
-    // === stabilisation et bruit léger ===
-    if (score < -200) score = -200;
-    if (score > 200)  score = 200;
-
-    static int last_eval = 500;
-    int eval = (int)(500 + (score * 2.5f));
-    eval = (int)(0.7f * last_eval + 0.3f * eval);
-    last_eval = eval;
-
-    eval += (rand() % 7) - 3; // bruit ±3
+    int eval = (int)(500.0f + (score * 2.5f));         // 0 → 500, +200 → 1000, -200 → 0
     if (eval < 1) eval = 1;
     if (eval > 1000) eval = 1000;
+
     return eval;
 }
 
 
-// ===============================
-// IA FAMINE (contrôle + opportunisme)
-// ===============================
 int evaluer_plateau_famine(Plateau* plateau, int joueur) {
     if (!plateau) return 500;
 
@@ -103,47 +71,54 @@ int evaluer_plateau_famine(Plateau* plateau, int joueur) {
     } while (p != plateau);
 
     float total = grainesJ + grainesA;
-    float phase = 1.0f - (total / 48.0f);
+    float phase = 1.0f - (total / 48.0f);  // 0 = début, 1 = fin
+
     float score = 0.0f;
 
-    // === noyau famine : pression et contrôle ===
+    // === noyau famine ===
+    // plus de vide et de cases à 1 graine chez l’adversaire = bonne pression
     score += 40.0f * (casesVidesA - casesVidesJ);
     score += 25.0f * (famine1A - famine1J);
+
+    // === mobilité et survie ===
     score += 10.0f * (coupsJ - coupsA);
     score += 10.0f * (captJ - captA);
-    score += 6.0f  * (grainesJ - grainesA);
+
+    // === ressources ===
+    score += 6.0f * (grainesJ - grainesA);
+
+    // === pression de phase : fin de partie plus tranchée ===
     score += phase * 20.0f * ((casesVidesA + famine1A) - (casesVidesJ + famine1J));
 
-    // === bonus et malus contextuels ===
+    // === bonus de situation ===
     if (grainesA <= 6) score += (30 - 3 * grainesA);
     if (coupsA <= 2)   score += 25;
     if (casesVidesA >= 6) score += 20;
 
+    // === malus survie personnelle ===
     if (grainesJ <= 6) score -= (30 - 3 * grainesJ);
     if (coupsJ <= 2)   score -= 25;
     if (casesVidesJ >= 6) score -= 20;
 
-    // === mode agressif si on domine ===
+    // si on domine clairement, passer en mode agressif
     if (grainesA < grainesJ - 6) {
         score += 15.0f * (captJ - captA);
         score += 8.0f  * (coupsJ - coupsA);
     }
 
+    // si on mène au score total, accepter plus de risque
     if (grainesJ > grainesA + 8) {
         score += 0.5f * (grainesJ - grainesA);
     }
+    
 
-    // === stabilisation + léger bruit ===
+    // === stabilisation : éviter saturation ===
     if (score < -250) score = -250;
     if (score > 250)  score = 250;
 
-    static int last_eval_famine = 500;
-    int eval = (int)(500 + (score * 2.0f));
-    eval = (int)(0.7f * last_eval_famine + 0.3f * eval);
-    last_eval_famine = eval;
-
-    eval += (rand() % 7) - 3; // bruit ±3
+    int eval = (int)(500 + (score * 2.0f));  // plage [0–1000]
     if (eval < 1) eval = 1;
     if (eval > 1000) eval = 1000;
+    
     return eval;
 }
