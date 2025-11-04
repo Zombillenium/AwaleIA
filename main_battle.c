@@ -9,7 +9,7 @@
 #include "tabletranspo.h"
 #include <omp.h>
 
-#define TEMPS_MAX 2.0  // Temps max par coup (en secondes)
+#define TEMPS_MAX 2.00  // Temps max par coup (en secondes)
 
 // --- Structures de jeu ---
 typedef struct {
@@ -39,6 +39,7 @@ void executer_coup(Partie* partie, int joueur, int best_case, int best_color, in
 // ============================
 
 int main() {
+    initialiser_zobrist();
     printf("💻 OpenMP détecte %d threads disponibles.\n", omp_get_max_threads());
     Partie partie;
     initialiser_partie(&partie);
@@ -88,44 +89,56 @@ int jouer_tour(Partie* partie) {
 
     if (joueur == 1) {
         // --- Tour HUMAIN ---
-        printf("👉 Entrez votre coup (ex: 1R, 5B, 3TR, 7TB) : ");
-        char input[8];
-        if (scanf("%7s", input) != 1) return 0;
+        int coup_valide = 0;
+        while (!coup_valide) {
+            printf("👉 Entrez votre coup (ex: 1R, 5B, 3TR, 7TB) : ");
+            char input[8];
+            if (scanf("%7s", input) != 1) return 0;
 
-        int c = 0, col = 0, mode = 0;
+            int c = 0, col = 0, mode = 0;
 
-        // --- Extraction du numéro de case ---
-        sscanf(input, "%d", &c);
+            // --- Extraction du numéro de case ---
+            sscanf(input, "%d", &c);
 
-        // --- Recherche des lettres après le chiffre ---
-        char* p = input;
-        while (*p && (*p >= '0' && *p <= '9')) p++;  // avance jusqu’à la première lettre
+            // --- Recherche des lettres après le chiffre ---
+            char* p = input;
+            while (*p && (*p >= '0' && *p <= '9')) p++;
 
-        if (*p) {
-            if (*p == 'R') { col = 1; mode = 0; }
-            else if (*p == 'B') { col = 2; mode = 0; }
-            else if (*p == 'T') {
-                col = 3;
-                p++;
-                if (*p == 'R') mode = 1;
-                else if (*p == 'B') mode = 2;
+            if (*p) {
+                if (*p == 'R') { col = 1; mode = 0; }
+                else if (*p == 'B') { col = 2; mode = 0; }
+                else if (*p == 'T') {
+                    col = 3;
+                    p++;
+                    if (*p == 'R') mode = 1;
+                    else if (*p == 'B') mode = 2;
+                }
             }
+
+            // --- Vérifications ---
+            if (c < 1 || c > partie->nb_cases || col == 0) {
+                printf("❌ Coup invalide. Exemples valides : 1R, 5B, 2TR, 3TB.\n");
+                continue; // redemande le coup
+            }
+
+            if (!case_du_joueur(c, joueur)) {
+                printf("⚠️  Cette case (%d) appartient à l’adversaire, tu ne peux pas y jouer.\n", c);
+                continue; // redemande le coup
+            }
+
+            // --- Exécution du coup ---
+            Plateau* case_j = trouver_case(partie->plateau, c);
+            Plateau* derniere = distribuer(case_j, col, joueur, mode);
+            int captures = capturer(partie->plateau, derniere, partie->nb_cases);
+            partie->scores[0] += captures;
+
+            printf("✅ Tu joues %d%s et captures %d graines.\n",
+                c, (col == 1 ? "R" : col == 2 ? "B" : mode == 1 ? "TR" : "TB"), captures);
+
+            coup_valide = 1; // on sort de la boucle
         }
-
-        // --- Vérification simple ---
-        if (c < 1 || c > partie->nb_cases || col == 0) {
-            printf("❌ Coup invalide. Exemples valides : 1R, 5B, 2TR, 3TB.\n");
-            return 1; // on redonne la main
-        }
-
-        Plateau* case_j = trouver_case(partie->plateau, c);
-        Plateau* derniere = distribuer(case_j, col, joueur, mode);
-        int captures = capturer(partie->plateau, derniere, partie->nb_cases);
-        partie->scores[0] += captures;
-
-        printf("✅ Tu joues %d%s et captures %d graines.\n",
-               c, (col == 1 ? "R" : col == 2 ? "B" : mode == 1 ? "TR" : "TB"), captures);
     }
+
     else {
         // --- Tour IA ---
         printf("🤖 L’IA calcule son coup...\n");

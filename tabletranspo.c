@@ -5,6 +5,8 @@ static omp_lock_t transpo_lock_J1;
 static omp_lock_t transpo_lock_J2;
 
 
+static unsigned long long zobrist[MAX_CASES][3][MAX_GRAINES + 1];
+
 Entry transpo_table_J1[HASH_SIZE];
 Entry transpo_table_J2[HASH_SIZE];
 
@@ -15,20 +17,40 @@ void initialiser_transpo_lock() {
 
 }
 
+void initialiser_zobrist() {
+    unsigned long long seed = 88172645463325252ULL; // arbitraire
+    for (int i = 0; i < MAX_CASES; i++) {
+        for (int j = 0; j < 3; j++) {
+            for (int k = 0; k <= MAX_GRAINES; k++) {
+                // Xorshift simple
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                zobrist[i][j][k] = seed;
+            }
+        }
+    }
+}
+
 
 
 unsigned long long hash_plateau(Plateau* plateau, int nb_cases) {
-    unsigned long long h = 1469598103934665603ULL; // FNV offset basis
+    unsigned long long h = 0ULL;
     Plateau* p = plateau;
     for (int i = 0; i < nb_cases; i++) {
-        // Mélange les valeurs des graines et du numéro de case
-        unsigned long long val = (p->R * 131 + p->B * 137 + p->T * 139 + p->caseN);
-        h ^= val;
-        h *= 1099511628211ULL; // FNV prime
+        int r = (p->R <= MAX_GRAINES) ? p->R : MAX_GRAINES;
+        int b = (p->B <= MAX_GRAINES) ? p->B : MAX_GRAINES;
+        int t = (p->T <= MAX_GRAINES) ? p->T : MAX_GRAINES;
+
+        h ^= zobrist[i][0][r];
+        h ^= zobrist[i][1][b];
+        h ^= zobrist[i][2][t];
+
         p = p->caseSuiv;
     }
     return h;
 }
+
 
 int chercher_transpo(int joueur, unsigned long long key, int profondeur, int* score_out) {
     Entry* table = (joueur == 1) ? transpo_table_J1 : transpo_table_J2;

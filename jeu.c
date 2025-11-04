@@ -20,33 +20,86 @@ int capturer(Plateau* plateau, Plateau* derniere, int nb_cases) {
 
 Plateau* distribuer(Plateau* depart, int couleur, int joueur, int mode_transp) {
     Plateau* courante = depart;
+    Plateau* derniere = NULL;
     int graines = 0;
 
-    if (couleur == 1) { graines = depart->R; depart->R = 0; }
-    else if (couleur == 2) { graines = depart->B; depart->B = 0; }
-    else if (couleur == 3) { graines = depart->T; depart->T = 0; }
+    // --- Cas normaux R ou B ---
+    if (couleur == 1) { 
+        graines = depart->R; 
+        depart->R = 0; 
+    }
+    else if (couleur == 2) { 
+        graines = depart->B; 
+        depart->B = 0; 
+    }
+    else if (couleur == 3) { 
+        graines = depart->T; 
+        depart->T = 0; 
+    }
 
-    Plateau* derniere = NULL;
-
+    // --- Première phase : distribution classique ---
     while (graines > 0) {
         courante = courante->caseSuiv;
-        if (courante == depart) continue;
+        if (courante == depart) continue; // ne pas redéposer dans la case d'origine
 
         if (couleur == 1) {
             courante->R++; graines--;
-        } else if (couleur == 2) {
-            if (!case_du_joueur(courante->caseN, joueur)) { courante->B++; graines--; }
-        } else if (couleur == 3) {
+        } 
+        else if (couleur == 2) {
+            if (!case_du_joueur(courante->caseN, joueur)) { 
+                courante->B++; graines--; 
+            }
+        } 
+        else if (couleur == 3) {
             if (mode_transp == 1) { // joue comme rouge
                 courante->T++; graines--;
-            } else if (mode_transp == 2 && !case_du_joueur(courante->caseN, joueur)) { // comme bleue
+            } 
+            else if (mode_transp == 2) { // joue comme bleue
+                if (!case_du_joueur(courante->caseN, joueur)) {
+                    courante->T++; graines--;
+                }
+            } 
+            else { // mode_transp == 0 → transparentes normales
                 courante->T++; graines--;
             }
         }
         derniere = courante;
     }
+
+    // --- Seconde phase : si T+R ou T+B ---
+    if (couleur == 3) {
+        // joue T+R
+        if (mode_transp == 1) {
+            int r = depart->R;
+            depart->R = 0;
+            while (r > 0) {
+                courante = courante->caseSuiv;
+                if (courante == depart) continue;
+                courante->R++; 
+                r--;
+                derniere = courante;
+            }
+        }
+
+        // joue T+B
+        else if (mode_transp == 2) {
+            int b = depart->B;
+            depart->B = 0;
+            while (b > 0) {
+                courante = courante->caseSuiv;
+                if (courante == depart) continue;
+                if (!case_du_joueur(courante->caseN, joueur)) {
+                    courante->B++; 
+                    b--;
+                    derniere = courante;
+                }
+            }
+        }
+    }
+
     return derniere;
 }
+
 
 
 // Joue un coup sur le plateau sans le copier

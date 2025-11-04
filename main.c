@@ -42,6 +42,7 @@ void executer_coup(Partie* partie, int joueur, int best_case, int best_color, in
 // ============================
 
 int main() {
+    initialiser_zobrist();
     printf("💻 OpenMP détecte %d threads disponibles.\n", omp_get_max_threads());
     Partie partie;
     initialiser_partie(&partie);
