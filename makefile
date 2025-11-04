@@ -1,40 +1,38 @@
-# === Nom de l'exécutable ===
-EXEC = main
+# === Noms des exécutables ===
+EXEC_MAIN   = main
+EXEC_BATTLE = main_battle
 
 # === Compilateur ===
 CC = gcc
 
-# === Options de compilation ===
-# -O3            : optimisation maximale
-# -march=native  : tire parti des instructions CPU de ta machine
-# -flto          : optimisation à l’édition de liens (LTO)
-# -funroll-loops : déroule les boucles (utile pour ton IA récursive)
-# -DNDEBUG       : désactive les assertions pour gagner du temps
-# -pipe          : accélère la compilation
-CFLAGS = -Wall -Wextra -std=c11 -O3 -march=native -flto -funroll-loops -DNDEBUG -pipe
+# === Options de compilation communes ===
+CFLAGS = -Wall -Wextra -std=c11 -O3 -march=native -flto -funroll-loops -DNDEBUG -pipe -fopenmp
 
-# === Fichiers sources ===
-SRC = main.c plateau.c jeu.c evaluation.c ia.c tabletranspo.c
+# === Fichiers sources communs ===
+SRC_COMMON = plateau.c jeu.c evaluation.c ia.c tabletranspo.c
 
-# === Objets générés automatiquement ===
-OBJ = $(SRC:.c=.o)
+# === Fichiers spécifiques ===
+SRC_MAIN   = main.c $(SRC_COMMON)
+SRC_BATTLE = main_battle.c $(SRC_COMMON)
+
+# === Objets ===
+OBJ_MAIN   = $(SRC_MAIN:.c=.o)
+OBJ_BATTLE = $(SRC_BATTLE:.c=.o)
 
 # === Règle par défaut ===
-all: release
+all: $(EXEC_MAIN) $(EXEC_BATTLE)
 
-# === Mode release (optimisé) ===
-release: CFLAGS = -Wall -Wextra -std=c11 -O3 -march=native -flto -funroll-loops -DNDEBUG -pipe -s -fopenmp
-release: $(EXEC)
+# === Compilation de main ===
+$(EXEC_MAIN): $(OBJ_MAIN)
+	@echo "🔧 Édition des liens pour $(EXEC_MAIN)..."
+	$(CC) $(OBJ_MAIN) -o $(EXEC_MAIN) $(CFLAGS)
+	@echo "✅ Compilation terminée : $(EXEC_MAIN)"
 
-# === Mode debug (avec infos gdb et sans optimisations) ===
-debug: CFLAGS = -Wall -Wextra -std=c11 -Og -g
-debug: clean $(EXEC)
-
-# === Compilation de l'exécutable ===
-$(EXEC): $(OBJ)
-	@echo "🔧 Édition des liens..."
-	$(CC) $(OBJ) -o $(EXEC) $(CFLAGS)
-	@echo "✅ Compilation terminée : $(EXEC)"
+# === Compilation de main_battle ===
+$(EXEC_BATTLE): $(OBJ_BATTLE)
+	@echo "🔧 Édition des liens pour $(EXEC_BATTLE)..."
+	$(CC) $(OBJ_BATTLE) -o $(EXEC_BATTLE) $(CFLAGS)
+	@echo "✅ Compilation terminée : $(EXEC_BATTLE)"
 
 # === Règle générique pour compiler les .c en .o ===
 %.o: %.c
@@ -44,14 +42,18 @@ $(EXEC): $(OBJ)
 # === Nettoyage des fichiers objets ===
 clean:
 	@echo "🧹 Nettoyage des fichiers objets..."
-	rm -f $(OBJ)
+	rm -f *.o
 
-# === Nettoyage complet (objets + exécutable) ===
+# === Nettoyage complet (objets + exécutables) ===
 mrproper: clean
-	@echo "🧽 Suppression de l’exécutable..."
-	rm -f $(EXEC)
+	@echo "🧽 Suppression des exécutables..."
+	rm -f $(EXEC_MAIN) $(EXEC_BATTLE)
 
-# === Raccourci pour exécuter directement le programme ===
-run: $(EXEC)
-	@echo "🚀 Lancement de $(EXEC)..."
-	./$(EXEC)
+# === Exécution rapide ===
+run-main: $(EXEC_MAIN)
+	@echo "🚀 Lancement de $(EXEC_MAIN)..."
+	./$(EXEC_MAIN)
+
+run-battle: $(EXEC_BATTLE)
+	@echo "🎮 Lancement de $(EXEC_BATTLE)..."
+	./$(EXEC_BATTLE)

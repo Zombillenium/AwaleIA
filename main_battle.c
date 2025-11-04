@@ -6,20 +6,16 @@
 #include "plateau.h"
 #include "jeu.h"
 #include "ia.h"
+#include "tabletranspo.h"
 #include <omp.h>
 
-
 #define TEMPS_MAX 2.0  // Temps max par coup (en secondes)
-
-// --- Déclarations ---
-int total_graines(Plateau* plateau, int nb_cases);
-int total_graines_joueur(Plateau* plateau, int nb_cases, int joueur);
 
 // --- Structures de jeu ---
 typedef struct {
     Plateau* plateau;
     int scores[2];
-    int tour; // 0 = J1, 1 = J2
+    int tour; // 0 = humain, 1 = IA
     int nb_cases;
 } Partie;
 
@@ -37,6 +33,7 @@ int verifier_conditions_fin(Partie* partie);
 int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_color, int* best_mode);
 void executer_coup(Partie* partie, int joueur, int best_case, int best_color, int best_mode);
 
+
 // ============================
 //        PROGRAMME PRINCIPAL
 // ============================
@@ -47,11 +44,11 @@ int main() {
     initialiser_partie(&partie);
     initialiser_transpo_lock();
 
-    printf("=== Début du match IA vs IA ===\n");
+    printf("=== Début du match Humain (J1) vs IA famine (J2) ===\n");
     afficher_plateau(partie.plateau, partie.nb_cases);
 
     while (1) {
-        if (!jouer_tour(&partie)) break; // Retourne 0 si fin de partie
+        if (!jouer_tour(&partie)) break;
         if (verifier_conditions_fin(&partie)) break;
         printf("----------------------------------------\n");
         partie.tour = 1 - partie.tour;
@@ -64,56 +61,100 @@ int main() {
 
 
 
-
+// ============================
+//     INITIALISATION
+// ============================
 
 void initialiser_partie(Partie* partie) {
     partie->nb_cases = 16;
     partie->plateau = creer_plateau(partie->nb_cases);
     partie->scores[0] = partie->scores[1] = 0;
-    partie->tour = 0;
+    partie->tour = 0; // humain commence
     initialiser_killer_moves();
 }
 
 
 
-
+// ============================
+//       TOUR DE JEU
+// ============================
 
 int jouer_tour(Partie* partie) {
     int joueur = partie->tour + 1;
-    char* noms[2] = {"J1 (classique)", "J2 (famine)"};
+    char* noms[2] = {"Humain (classique)", "IA (famine)"};
     printf("\n=== Tour de %s ===\n", noms[partie->tour]);
 
     int best_case = -1, best_color = -1, best_mode = 0;
 
-    // --- Sélection du meilleur coup ---
-    int ok = choisir_meilleur_coup(partie, joueur, &best_case, &best_color, &best_mode);
-    if (!ok) {
-        printf("⚠️  Aucun coup possible pour %s.\n", noms[partie->tour]);
-        return 0;
+    if (joueur == 1) {
+        // --- Tour HUMAIN ---
+        printf("👉 Entrez votre coup (ex: 1R, 5B, 3TR, 7TB) : ");
+        char input[8];
+        if (scanf("%7s", input) != 1) return 0;
+
+        int c = 0, col = 0, mode = 0;
+
+        // --- Extraction du numéro de case ---
+        sscanf(input, "%d", &c);
+
+        // --- Recherche des lettres après le chiffre ---
+        char* p = input;
+        while (*p && (*p >= '0' && *p <= '9')) p++;  // avance jusqu’à la première lettre
+
+        if (*p) {
+            if (*p == 'R') { col = 1; mode = 0; }
+            else if (*p == 'B') { col = 2; mode = 0; }
+            else if (*p == 'T') {
+                col = 3;
+                p++;
+                if (*p == 'R') mode = 1;
+                else if (*p == 'B') mode = 2;
+            }
+        }
+
+        // --- Vérification simple ---
+        if (c < 1 || c > partie->nb_cases || col == 0) {
+            printf("❌ Coup invalide. Exemples valides : 1R, 5B, 2TR, 3TB.\n");
+            return 1; // on redonne la main
+        }
+
+        Plateau* case_j = trouver_case(partie->plateau, c);
+        Plateau* derniere = distribuer(case_j, col, joueur, mode);
+        int captures = capturer(partie->plateau, derniere, partie->nb_cases);
+        partie->scores[0] += captures;
+
+        printf("✅ Tu joues %d%s et captures %d graines.\n",
+               c, (col == 1 ? "R" : col == 2 ? "B" : mode == 1 ? "TR" : "TB"), captures);
+    }
+    else {
+        // --- Tour IA ---
+        printf("🤖 L’IA calcule son coup...\n");
+        int ok = choisir_meilleur_coup(partie, joueur, &best_case, &best_color, &best_mode);
+        if (!ok) {
+            printf("⚠️  Aucun coup possible pour l’IA.\n");
+            return 0;
+        }
+        executer_coup(partie, joueur, best_case, best_color, best_mode);
     }
 
-    // --- Exécution du coup ---
-    executer_coup(partie, joueur, best_case, best_color, best_mode);
     afficher_plateau(partie->plateau, partie->nb_cases);
-
-    printf("Scores -> J1: %d | J2: %d\n", partie->scores[0], partie->scores[1]);
-    int evalJ1 = evaluer_plateau(partie->plateau, 1);
-    int evalJ2 = evaluer_plateau_famine(partie->plateau, 2);
-    printf("Évaluation -> J1: %d | J2: %d\n", evalJ1, evalJ2);
+    printf("Scores -> Humain: %d | IA: %d\n", partie->scores[0], partie->scores[1]);
     return 1;
 }
 
 
 
 
-
+// ============================
+//      IA (meilleur coup)
+// ============================
 
 int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_color, int* best_mode) {
     const int nb_cases = partie->nb_cases;
     Plateau* plateau = partie->plateau;
 
-    struct timeval debut, courant;
-    gettimeofday(&debut, NULL); // chrono global
+    struct timeval debut;
+    gettimeofday(&debut, NULL);
 
     omp_set_nested(0);
     omp_set_dynamic(0);
@@ -128,8 +169,6 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
     double duree_derniere = 0.0;
     int profondeur_finale = 1;
     Move best_previous = {-1, -1, 0};
-
-    // <<< ASPIRATION : on mémorise le score racine précédent
     int last_score = 0;
     int have_last = 0;
 
@@ -138,7 +177,6 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
         Move moves[16 * 3 * 2];
         int nmoves = 0;
         Plateau* p = plateau;
-
         for (int i = 0; i < nb_cases; i++) {
             if (case_du_joueur(p->caseN, joueur)) {
                 if (p->R > 0) moves[nmoves++] = (Move){p->caseN, 1, 0};
@@ -152,7 +190,7 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
         }
         if (nmoves == 0) return 0;
 
-        // <<< iterative deepening : prioriser le meilleur coup précédent
+        // priorité au coup précédent
         if (best_previous.caseN != -1) {
             for (int i = 0; i < nmoves; i++) {
                 if (moves[i].caseN == best_previous.caseN &&
@@ -164,7 +202,7 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
             }
         }
 
-        // <<< ASPIRATION : fenêtre initiale
+        // aspiration
         int ASP = 75;
         int alpha_root = have_last ? (last_score - ASP) : -100000;
         int beta_root  = have_last ? (last_score + ASP) :  100000;
@@ -172,8 +210,7 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
         int best_case_temp = -1, best_color_temp = -1, best_mode_temp = 0;
         int meilleur_score_local = -999999;
 
-        // On va potentiellement relancer la même profondeur si la fenêtre est trop serrée
-        for (;;) { // boucle d'aspiration
+        for (;;) {
             best_case_temp = -1; best_color_temp = -1; best_mode_temp = 0;
             meilleur_score_local = -999999;
 
@@ -189,7 +226,6 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
                                                (mv.couleur == 3 ? mv.mode : 0));
                 int captures = capturer(copie, derniere, nb_cases);
 
-                // <<< ASPIRATION : on utilise alpha/beta racine serrés
                 int score = minimax(copie, joueur, d, alpha_root, beta_root, 1) + captures * 5;
 
                 #pragma omp critical
@@ -208,52 +244,46 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
             double duree = (t2.tv_sec - t1.tv_sec) + (t2.tv_usec - t1.tv_usec) / 1000000.0;
             duree_derniere = duree;
 
-            // Affichage standard
-            printf("🔹 Profondeur %d terminée en %.3fs | Meilleur coup : ", d, duree);
+            printf("🔹 Profondeur %d terminée en %.3fs | Meilleur coup : ",
+                   d, duree);
             if (best_color_temp == 1) printf("%dR", best_case_temp);
             else if (best_color_temp == 2) printf("%dB", best_case_temp);
             else if (best_color_temp == 3 && best_mode_temp == 1) printf("%dTR", best_case_temp);
             else if (best_color_temp == 3 && best_mode_temp == 2) printf("%dTB", best_case_temp);
             printf(" (score %d)", meilleur_score_local);
 
-            // <<< ASPIRATION : détection fail-low / fail-high
             if (have_last && meilleur_score_local <= alpha_root) {
-                // fail-low → élargir vers le bas et relancer
                 ASP *= 2;
                 alpha_root = last_score - ASP;
                 beta_root  = last_score + ASP;
-                printf("  ⤵️  fail-low → élargit à [%d, %d]\n", alpha_root, beta_root);
+                printf(" ⤵️ fail-low → [%d,%d]\n", alpha_root, beta_root);
                 fflush(stdout);
-                continue; // relance la profondeur d
+                continue;
             } else if (have_last && meilleur_score_local >= beta_root) {
-                // fail-high → élargir vers le haut et relancer
                 ASP *= 2;
                 alpha_root = last_score - ASP;
                 beta_root  = last_score + ASP;
-                printf("  ⤴️  fail-high → élargit à [%d, %d]\n", alpha_root, beta_root);
+                printf(" ⤴️ fail-high → [%d,%d]\n", alpha_root, beta_root);
                 fflush(stdout);
-                continue; // relance la profondeur d
+                continue;
             } else {
                 printf("\n");
-                break; // fenêtre OK, on valide cette profondeur
+                break;
             }
         }
 
-        // On valide les résultats pour cette profondeur
         *best_case = best_case_temp;
         *best_color = best_color_temp;
         *best_mode = best_mode_temp;
         profondeur_finale = d;
         best_previous = (Move){*best_case, *best_color, *best_mode};
 
-        // <<< ASPIRATION : mémorise le score racine
         last_score = (meilleur_score_local == -999999) ? 0 : meilleur_score_local;
         have_last = 1;
 
-        // Stop si on va dépasser 2s
         if (duree_derniere * 8.0 >= TEMPS_MAX) {
-            printf("⏱️  Prochaine profondeur estimée à %.3fs (>%.1fs) → arrêt anticipé.\n",
-                   duree_derniere * 8.0, TEMPS_MAX);
+            printf("⏱️ Prochaine profondeur estimée à %.3fs → arrêt anticipé.\n",
+                   duree_derniere * 8.0);
             break;
         }
     }
@@ -264,11 +294,12 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
 
 
 
-
-
+// ============================
+//      EXECUTION + FIN
+// ============================
 
 void executer_coup(Partie* partie, int joueur, int best_case, int best_color, int best_mode) {
-    char* noms[2] = {"J1 (classique)", "J2 (famine)"};
+    char* noms[2] = {"Humain (classique)", "IA (famine)"};
     Plateau* c = trouver_case(partie->plateau, best_case);
     Plateau* derniere = distribuer(c, best_color, joueur, best_mode);
     int captures = capturer(partie->plateau, derniere, partie->nb_cases);
@@ -282,19 +313,18 @@ void executer_coup(Partie* partie, int joueur, int best_case, int best_color, in
     printf(" et capture %d graines.\n", captures);
 }
 
-
 int verifier_conditions_fin(Partie* partie) {
     int totalJ1 = total_graines_joueur(partie->plateau, partie->nb_cases, 1);
     int totalJ2 = total_graines_joueur(partie->plateau, partie->nb_cases, 2);
     int total = totalJ1 + totalJ2;
 
     if (totalJ1 == 0 && totalJ2 > 0) {
-        printf("💀 Famine ! J2 récupère toutes les graines restantes (%d).\n", totalJ2);
+        printf("💀 Famine ! IA récupère toutes les graines restantes (%d).\n", totalJ2);
         partie->scores[1] += totalJ2;
         return 1;
     }
     if (totalJ2 == 0 && totalJ1 > 0) {
-        printf("💀 Famine ! J1 récupère toutes les graines restantes (%d).\n", totalJ1);
+        printf("💀 Famine ! Tu récupères toutes les graines restantes (%d).\n", totalJ1);
         partie->scores[0] += totalJ1;
         return 1;
     }
@@ -305,14 +335,13 @@ int verifier_conditions_fin(Partie* partie) {
     return 0;
 }
 
-
 void afficher_resultats(Partie* partie) {
     printf("\n=== Fin de la partie ===\n");
-    printf("Score final -> J1: %d | J2: %d\n", partie->scores[0], partie->scores[1]);
+    printf("Score final -> Toi: %d | IA: %d\n", partie->scores[0], partie->scores[1]);
     if (partie->scores[0] > partie->scores[1])
-        printf("🏆 Victoire de J1 (classique)\n");
+        printf("🏆 Bravo ! Tu gagnes 🎉\n");
     else if (partie->scores[1] > partie->scores[0])
-        printf("🏆 Victoire de J2 (famine)\n");
+        printf("🤖 Victoire de l’IA famine.\n");
     else
-        printf("🤝 Match nul\n");
+        printf("🤝 Match nul.\n");
 }
