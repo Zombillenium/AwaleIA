@@ -65,9 +65,10 @@ Plateau* case_precedente(Plateau* plateau, Plateau* cible, int nb_cases) {
     return p;
 }
 
-int case_du_joueur(int caseN, int joueur) {
-    return (joueur == 1) ? (caseN % 2 == 1) : (caseN % 2 == 0);
+inline int case_du_joueur(int caseN, int joueur) {
+    return (joueur == 1) ? (caseN & 1) : !(caseN & 1);
 }
+
 
 int total_graines(Plateau* plateau, int nb_cases) {
     int total = 0;

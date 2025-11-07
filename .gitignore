@@ -1,0 +1,16 @@
+# Fichiers temporaires
+*.o
+*.out
+*.log
+
+# Binaires compilés
+main
+main_battle
+main_mqtt
+
+# Données sensibles
+.env
+
+# Autres fichiers à ne pas suivre
+.DS_Store
+paho.mqtt.c/.git

@@ -11,26 +11,11 @@
 
 #define TEMPS_MAX 2.00  // Temps max par coup (en secondes)
 
-// --- Structures de jeu ---
-typedef struct {
-    Plateau* plateau;
-    int scores[2];
-    int tour; // 0 = humain, 1 = IA
-    int nb_cases;
-} Partie;
-
-typedef struct {
-    int caseN;
-    int couleur;  // 1=R, 2=B, 3=T
-    int mode;     // pour T: 1=TR, 2=TB; sinon 0
-} Move;
-
 // --- Fonctions ---
 void initialiser_partie(Partie* partie);
 int jouer_tour(Partie* partie);
 void afficher_resultats(Partie* partie);
 int verifier_conditions_fin(Partie* partie);
-int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_color, int* best_mode);
 void executer_coup(Partie* partie, int joueur, int best_case, int best_color, int best_mode);
 
 
@@ -126,8 +111,23 @@ int jouer_tour(Partie* partie) {
                 continue; // redemande le coup
             }
 
-            // --- Exécution du coup ---
+            // --- Vérifie qu’il y a bien des graines du bon type ---
             Plateau* case_j = trouver_case(partie->plateau, c);
+            int graines_disponibles = 0;
+
+            if (col == 1) graines_disponibles = case_j->R;
+            else if (col == 2) graines_disponibles = case_j->B;
+            else if (col == 3) {
+                if (mode == 1) graines_disponibles = case_j->T + case_j->R; // TR
+                else if (mode == 2) graines_disponibles = case_j->T + case_j->B; // TB
+            }
+
+            if (graines_disponibles == 0) {
+                printf("❌ Cette case (%d) ne contient aucune graine correspondante à ton coup.\n", c);
+                continue; // redemande un coup
+            }
+
+            // --- Exécution du coup ---
             Plateau* derniere = distribuer(case_j, col, joueur, mode);
             int captures = capturer(partie->plateau, derniere, partie->nb_cases);
             partie->scores[0] += captures;
@@ -156,157 +156,6 @@ int jouer_tour(Partie* partie) {
 }
 
 
-
-
-// ============================
-//      IA (meilleur coup)
-// ============================
-
-int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_color, int* best_mode) {
-    const int nb_cases = partie->nb_cases;
-    Plateau* plateau = partie->plateau;
-
-    struct timeval debut;
-    gettimeofday(&debut, NULL);
-
-    omp_set_nested(0);
-    omp_set_dynamic(0);
-
-    #ifdef _OPENMP
-    #pragma omp parallel
-    {
-        initialiser_killer_moves();
-    }
-    #endif
-
-    double duree_derniere = 0.0;
-    int profondeur_finale = 1;
-    Move best_previous = {-1, -1, 0};
-    int last_score = 0;
-    int have_last = 0;
-
-    for (int d = 1; d <= 25; d++) {
-
-        Move moves[16 * 3 * 2];
-        int nmoves = 0;
-        Plateau* p = plateau;
-        for (int i = 0; i < nb_cases; i++) {
-            if (case_du_joueur(p->caseN, joueur)) {
-                if (p->R > 0) moves[nmoves++] = (Move){p->caseN, 1, 0};
-                if (p->B > 0) moves[nmoves++] = (Move){p->caseN, 2, 0};
-                if (p->T > 0) {
-                    moves[nmoves++] = (Move){p->caseN, 3, 1};
-                    moves[nmoves++] = (Move){p->caseN, 3, 2};
-                }
-            }
-            p = p->caseSuiv;
-        }
-        if (nmoves == 0) return 0;
-
-        // priorité au coup précédent
-        if (best_previous.caseN != -1) {
-            for (int i = 0; i < nmoves; i++) {
-                if (moves[i].caseN == best_previous.caseN &&
-                    moves[i].couleur == best_previous.couleur &&
-                    moves[i].mode == best_previous.mode) {
-                    Move tmp = moves[0]; moves[0] = moves[i]; moves[i] = tmp;
-                    break;
-                }
-            }
-        }
-
-        // aspiration
-        int ASP = 75;
-        int alpha_root = have_last ? (last_score - ASP) : -100000;
-        int beta_root  = have_last ? (last_score + ASP) :  100000;
-
-        int best_case_temp = -1, best_color_temp = -1, best_mode_temp = 0;
-        int meilleur_score_local = -999999;
-
-        for (;;) {
-            best_case_temp = -1; best_color_temp = -1; best_mode_temp = 0;
-            meilleur_score_local = -999999;
-
-            struct timeval t1, t2;
-            gettimeofday(&t1, NULL);
-
-            #pragma omp parallel for schedule(dynamic,1) reduction(max:meilleur_score_local)
-            for (int k = 0; k < nmoves; k++) {
-                Move mv = moves[k];
-                Plateau* copie = copier_plateau(plateau, nb_cases);
-                Plateau* case_copie = trouver_case(copie, mv.caseN);
-                Plateau* derniere = distribuer(case_copie, mv.couleur, joueur,
-                                               (mv.couleur == 3 ? mv.mode : 0));
-                int captures = capturer(copie, derniere, nb_cases);
-
-                int score = minimax(copie, joueur, d, alpha_root, beta_root, 1) + captures * 5;
-
-                #pragma omp critical
-                {
-                    if (score > meilleur_score_local) {
-                        meilleur_score_local = score;
-                        best_case_temp  = mv.caseN;
-                        best_color_temp = mv.couleur;
-                        best_mode_temp  = (mv.couleur == 3 ? mv.mode : 0);
-                    }
-                }
-                liberer_plateau(copie, nb_cases);
-            }
-
-            gettimeofday(&t2, NULL);
-            double duree = (t2.tv_sec - t1.tv_sec) + (t2.tv_usec - t1.tv_usec) / 1000000.0;
-            duree_derniere = duree;
-
-            printf("🔹 Profondeur %d terminée en %.3fs | Meilleur coup : ",
-                   d, duree);
-            if (best_color_temp == 1) printf("%dR", best_case_temp);
-            else if (best_color_temp == 2) printf("%dB", best_case_temp);
-            else if (best_color_temp == 3 && best_mode_temp == 1) printf("%dTR", best_case_temp);
-            else if (best_color_temp == 3 && best_mode_temp == 2) printf("%dTB", best_case_temp);
-            printf(" (score %d)", meilleur_score_local);
-
-            if (have_last && meilleur_score_local <= alpha_root) {
-                ASP *= 2;
-                alpha_root = last_score - ASP;
-                beta_root  = last_score + ASP;
-                printf(" ⤵️ fail-low → [%d,%d]\n", alpha_root, beta_root);
-                fflush(stdout);
-                continue;
-            } else if (have_last && meilleur_score_local >= beta_root) {
-                ASP *= 2;
-                alpha_root = last_score - ASP;
-                beta_root  = last_score + ASP;
-                printf(" ⤴️ fail-high → [%d,%d]\n", alpha_root, beta_root);
-                fflush(stdout);
-                continue;
-            } else {
-                printf("\n");
-                break;
-            }
-        }
-
-        *best_case = best_case_temp;
-        *best_color = best_color_temp;
-        *best_mode = best_mode_temp;
-        profondeur_finale = d;
-        best_previous = (Move){*best_case, *best_color, *best_mode};
-
-        last_score = (meilleur_score_local == -999999) ? 0 : meilleur_score_local;
-        have_last = 1;
-
-        if (duree_derniere * 8.0 >= TEMPS_MAX) {
-            printf("⏱️ Prochaine profondeur estimée à %.3fs → arrêt anticipé.\n",
-                   duree_derniere * 8.0);
-            break;
-        }
-    }
-
-    printf("✅ Profondeur finale retenue : %d\n", profondeur_finale);
-    return (*best_case != -1);
-}
-
-
-
 // ============================
 //      EXECUTION + FIN
 // ============================
@@ -332,21 +181,27 @@ int verifier_conditions_fin(Partie* partie) {
     int total = totalJ1 + totalJ2;
 
     if (totalJ1 == 0 && totalJ2 > 0) {
+        // J1 (humain) est affamé → J2 (IA) récupère les graines restantes
         printf("💀 Famine ! IA récupère toutes les graines restantes (%d).\n", totalJ2);
         partie->scores[1] += totalJ2;
         return 1;
     }
+
     if (totalJ2 == 0 && totalJ1 > 0) {
+        // J2 (IA) est affamée → J1 (humain) récupère les graines restantes
         printf("💀 Famine ! Tu récupères toutes les graines restantes (%d).\n", totalJ1);
         partie->scores[0] += totalJ1;
         return 1;
     }
+
     if (total < 10) {
         printf("⚖️  Moins de 10 graines restantes — fin de la partie.\n");
         return 1;
     }
+
     return 0;
 }
+
 
 void afficher_resultats(Partie* partie) {
     printf("\n=== Fin de la partie ===\n");

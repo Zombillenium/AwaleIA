@@ -9,6 +9,7 @@
 // --- Fonctions principales ---
 void meilleur_coup(Plateau* plateau, int joueur);
 int minimax(Plateau* plateau, int joueur, int profondeur, int alpha, int beta, int maximisant);
+int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_color, int* best_mode);
 
 // --- Fonctions utilitaires ---
 Plateau* copier_plateau(Plateau* original, int nb_cases);
