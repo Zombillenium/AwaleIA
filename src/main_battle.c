@@ -15,7 +15,6 @@
 void initialiser_partie(Partie* partie);
 int jouer_tour(Partie* partie);
 void afficher_resultats(Partie* partie);
-int verifier_conditions_fin(Partie* partie);
 void executer_coup(Partie* partie, int joueur, int best_case, int best_color, int best_mode);
 
 
@@ -31,7 +30,7 @@ int main() {
     initialiser_transpo_lock();
 
     printf("=== Début du match Humain (J1) vs IA famine (J2) ===\n");
-    afficher_plateau(partie.plateau, partie.nb_cases);
+    afficher_plateau(partie.plateau);
 
     while (1) {
         if (!jouer_tour(&partie)) break;
@@ -41,7 +40,7 @@ int main() {
     }
 
     afficher_resultats(&partie);
-    liberer_plateau(partie.plateau, partie.nb_cases);
+    liberer_plateau(partie.plateau);
     return 0;
 }
 
@@ -52,8 +51,7 @@ int main() {
 // ============================
 
 void initialiser_partie(Partie* partie) {
-    partie->nb_cases = 16;
-    partie->plateau = creer_plateau(partie->nb_cases);
+    partie->plateau = creer_plateau();        // plus de nb_cases
     partie->scores[0] = partie->scores[1] = 0;
     partie->tour = 0; // humain commence
     initialiser_killer_moves();
@@ -101,7 +99,7 @@ int jouer_tour(Partie* partie) {
             }
 
             // --- Vérifications ---
-            if (c < 1 || c > partie->nb_cases || col == 0) {
+            if (c < 1 || c > nb_cases || col == 0) {
                 printf("❌ Coup invalide. Exemples valides : 1R, 5B, 2TR, 3TB.\n");
                 continue; // redemande le coup
             }
@@ -129,7 +127,7 @@ int jouer_tour(Partie* partie) {
 
             // --- Exécution du coup ---
             Plateau* derniere = distribuer(case_j, col, joueur, mode);
-            int captures = capturer(partie->plateau, derniere, partie->nb_cases);
+            int captures = capturer(partie->plateau, derniere);
             partie->scores[0] += captures;
 
             printf("✅ Tu joues %d%s et captures %d graines.\n",
@@ -150,7 +148,7 @@ int jouer_tour(Partie* partie) {
         executer_coup(partie, joueur, best_case, best_color, best_mode);
     }
 
-    afficher_plateau(partie->plateau, partie->nb_cases);
+    afficher_plateau(partie->plateau);
     printf("Scores -> Humain: %d | IA: %d\n", partie->scores[0], partie->scores[1]);
     return 1;
 }
@@ -164,7 +162,7 @@ void executer_coup(Partie* partie, int joueur, int best_case, int best_color, in
     char* noms[2] = {"Humain (classique)", "IA (famine)"};
     Plateau* c = trouver_case(partie->plateau, best_case);
     Plateau* derniere = distribuer(c, best_color, joueur, best_mode);
-    int captures = capturer(partie->plateau, derniere, partie->nb_cases);
+    int captures = capturer(partie->plateau, derniere);
     partie->scores[joueur - 1] += captures;
 
     printf("👉 %s joue ", noms[joueur - 1]);
@@ -173,33 +171,6 @@ void executer_coup(Partie* partie, int joueur, int best_case, int best_color, in
     else if (best_color == 3 && best_mode == 1) printf("%dTR", best_case);
     else if (best_color == 3 && best_mode == 2) printf("%dTB", best_case);
     printf(" et capture %d graines.\n", captures);
-}
-
-int verifier_conditions_fin(Partie* partie) {
-    int totalJ1 = total_graines_joueur(partie->plateau, partie->nb_cases, 1);
-    int totalJ2 = total_graines_joueur(partie->plateau, partie->nb_cases, 2);
-    int total = totalJ1 + totalJ2;
-
-    if (totalJ1 == 0 && totalJ2 > 0) {
-        // J1 (humain) est affamé → J2 (IA) récupère les graines restantes
-        printf("💀 Famine ! IA récupère toutes les graines restantes (%d).\n", totalJ2);
-        partie->scores[1] += totalJ2;
-        return 1;
-    }
-
-    if (totalJ2 == 0 && totalJ1 > 0) {
-        // J2 (IA) est affamée → J1 (humain) récupère les graines restantes
-        printf("💀 Famine ! Tu récupères toutes les graines restantes (%d).\n", totalJ1);
-        partie->scores[0] += totalJ1;
-        return 1;
-    }
-
-    if (total < 10) {
-        printf("⚖️  Moins de 10 graines restantes — fin de la partie.\n");
-        return 1;
-    }
-
-    return 0;
 }
 
 

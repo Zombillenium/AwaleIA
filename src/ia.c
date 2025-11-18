@@ -1,5 +1,5 @@
 #include "ia.h"
-#include <sys/time.h>   // ✅ pour struct timeval et gettimeofday
+#include <sys/time.h>   // pour struct timeval et gettimeofday
 #include "plateau.h"
 #include "jeu.h"
 #include "evaluation.h"
@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -14,7 +15,7 @@
 #define MAX_PROFONDEUR 32
 #define MAX_KILLERS 2
 
-// ✅ killer_moves déclaré UNE SEULE FOIS ici, dans ia.c
+// killer_moves déclaré UNE SEULE FOIS ici, dans ia.c
 static Coup killer_moves[MAX_PROFONDEUR][MAX_KILLERS];
 
 #ifdef _OPENMP
@@ -29,10 +30,11 @@ static Coup killer_moves[MAX_PROFONDEUR][MAX_KILLERS];
 // =============================
 
 // Copie complète d’un plateau
-Plateau* copier_plateau(Plateau* original, int nb_cases) {
-    Plateau* copie = creer_plateau(nb_cases);
+Plateau* copier_plateau(Plateau* original) {
+    Plateau* copie = creer_plateau();
     Plateau* p1 = original;
     Plateau* p2 = copie;
+
     for (int i = 0; i < nb_cases; i++) {
         p2->R = p1->R;
         p2->B = p1->B;
@@ -48,8 +50,8 @@ void initialiser_killer_moves() {
     memset(killer_moves, 0, sizeof(killer_moves));
 }
 
-// === Trie les cases selon le nombre de graines (ordre décroissant)
-void trier_cases_par_valeur(Plateau* plateau, int nb_cases, int* ordre, int* valeurs) {
+// Trie les cases selon le nombre de graines (ordre décroissant)
+void trier_cases_par_valeur(Plateau* plateau, int* ordre, int* valeurs) {
     for (int i = 0; i < nb_cases; i++) {
         ordre[i] = i + 1;
         Plateau* tmp = trouver_case(plateau, i + 1);
@@ -64,8 +66,6 @@ void trier_cases_par_valeur(Plateau* plateau, int nb_cases, int* ordre, int* val
         }
     }
 }
-
-
 
 
 // Enregistre un killer move lors d'une coupe beta
@@ -84,11 +84,9 @@ void enregistrer_killer_move(int profondeur, Coup coup) {
 }
 
 
-
-
 // Explore d’abord les killer moves à cette profondeur
 void tester_killer_moves(Plateau* plateau, int joueur, int joueur_actuel,
-                         int profondeur, int nb_cases,
+                         int profondeur,
                          int* meilleur_score, int* alpha, int* beta, int maximisant) {
 
     for (int k = 0; k < MAX_KILLERS; k++) {
@@ -105,10 +103,10 @@ void tester_killer_moves(Plateau* plateau, int joueur, int joueur_actuel,
             (couleur == 3 && c->T == 0))
             continue;
 
-        jouer_coup(plateau, km, nb_cases);
+        jouer_coup(plateau, km);
         int score = minimax(plateau, joueur, profondeur - 1, *alpha, *beta, !maximisant);
         score += (maximisant ? km->captures * 5 : -km->captures * 5);
-        annuler_coup(plateau, km, nb_cases);
+        annuler_coup(plateau, km);
 
         if (maximisant) {
             if (score > *meilleur_score) *meilleur_score = score;
@@ -122,21 +120,31 @@ void tester_killer_moves(Plateau* plateau, int joueur, int joueur_actuel,
     }
 }
 
-int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_color, int* best_mode) {
-    const int nb_cases = partie->nb_cases;
+
+// =============================
+//   CHOIX DU MEILLEUR COUP
+// =============================
+
+int choisir_meilleur_coup(Partie* partie, int joueur,
+                          int* best_case, int* best_color, int* best_mode) {
+
     Plateau* plateau = partie->plateau;
 
     struct timeval debut;
     gettimeofday(&debut, NULL);
 
+    #ifdef _OPENMP
     omp_set_nested(0);
     omp_set_dynamic(0);
+    #endif
 
     #ifdef _OPENMP
     #pragma omp parallel
     {
         initialiser_killer_moves();
     }
+    #else
+    initialiser_killer_moves();
     #endif
 
     double duree_derniere = 0.0;
@@ -147,16 +155,17 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
 
     for (int d = 1; d <= 25; d++) {
 
-        Move moves[16 * 3 * 2];
+        Move moves[nb_cases * 3 * 2];
         int nmoves = 0;
         Plateau* p = plateau;
+
         for (int i = 0; i < nb_cases; i++) {
             if (!case_du_joueur(p->caseN, joueur)) {
                 p = p->caseSuiv;
                 continue; // ne pas jouer les cases de l’adversaire
             }
 
-            // 🧩 Ajout : filtrage des coups impossibles (cases vides)
+            // Filtrage des coups impossibles (cases vides)
             if (p->R > 0) {
                 moves[nmoves++] = (Move){p->caseN, 1, 0}; // Rouge seul
             }
@@ -174,7 +183,6 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
 
             p = p->caseSuiv;
         }
-
 
         if (nmoves == 0) return 0;
 
@@ -205,18 +213,22 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
             struct timeval t1, t2;
             gettimeofday(&t1, NULL);
 
+            #ifdef _OPENMP
             #pragma omp parallel for schedule(dynamic,1) reduction(max:meilleur_score_local)
+            #endif
             for (int k = 0; k < nmoves; k++) {
                 Move mv = moves[k];
-                Plateau* copie = copier_plateau(plateau, nb_cases);
+                Plateau* copie = copier_plateau(plateau);
                 Plateau* case_copie = trouver_case(copie, mv.caseN);
                 Plateau* derniere = distribuer(case_copie, mv.couleur, joueur,
                                                (mv.couleur == 3 ? mv.mode : 0));
-                int captures = capturer(copie, derniere, nb_cases);
+                int captures = capturer(copie, derniere);
 
                 int score = minimax(copie, joueur, d, alpha_root, beta_root, 1) + captures * 5;
 
+                #ifdef _OPENMP
                 #pragma omp critical
+                #endif
                 {
                     if (score > meilleur_score_local) {
                         meilleur_score_local = score;
@@ -225,7 +237,7 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
                         best_mode_temp  = (mv.couleur == 3 ? mv.mode : 0);
                     }
                 }
-                liberer_plateau(copie, nb_cases);
+                liberer_plateau(copie);
             }
 
             gettimeofday(&t2, NULL);
@@ -282,40 +294,38 @@ int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_
 
 
 
+// =============================
+//        MINIMAX
+// =============================
 
+int minimax(Plateau* plateau, int joueur, int profondeur,
+            int alpha, int beta, int maximisant) {
 
-
-
-
-
-int minimax(Plateau* plateau, int joueur, int profondeur, int alpha, int beta, int maximisant) {
-
-    int nb_cases = 16;
-
-    unsigned long long key = hash_plateau(plateau, nb_cases);
+    unsigned long long key = hash_plateau(plateau);
     int val_cache;
     if (chercher_transpo(joueur, key, profondeur, &val_cache)) return val_cache;
 
     if (profondeur == 0) {
         int eval = (joueur  == 1)
-            ? evaluer_plateau(plateau, joueur )
-            : evaluer_plateau_famine(plateau, joueur );
+            ? evaluer_plateau(plateau, joueur)
+            : evaluer_plateau_famine(plateau, joueur);
         ajouter_transpo(joueur, key, profondeur, eval);
         return eval;
     }
 
     int meilleur_score = maximisant ? -99999 : 99999;
+    int coup_trouve = 0;
     int joueur_actuel = maximisant ? joueur : 3 - joueur;
 
-    // 🔹 On essaie d’abord les killer moves
+    // On essaie d’abord les killer moves
     tester_killer_moves(plateau, joueur, joueur_actuel, profondeur,
-                        nb_cases, &meilleur_score, &alpha, &beta, maximisant);
+                        &meilleur_score, &alpha, &beta, maximisant);
 
-    // 🔹 On trie les cases par valeur
-    int ordre[16], valeurs[16];
-    trier_cases_par_valeur(plateau, nb_cases, ordre, valeurs);
+    // On trie les cases par valeur
+    int ordre[nb_cases], valeurs[nb_cases];
+    trier_cases_par_valeur(plateau, ordre, valeurs);
 
-    // 🔹 Exploration des coups
+    // Exploration des coups
     for (int idx = 0; idx < nb_cases; idx++) {
         Plateau* c = trouver_case(plateau, ordre[idx]);
         if (!case_du_joueur(c->caseN, joueur_actuel)) continue;
@@ -339,10 +349,12 @@ int minimax(Plateau* plateau, int joueur, int profondeur, int alpha, int beta, i
                     .joueur = joueur_actuel
                 };
 
-                jouer_coup(plateau, &coup, nb_cases);
-                int score = minimax(plateau, joueur, profondeur - 1, alpha, beta, !maximisant);
+                jouer_coup(plateau, &coup);
+                coup_trouve = 1;
+                int score = minimax(plateau, joueur, profondeur - 1,
+                                    alpha, beta, !maximisant);
                 score += (maximisant ? coup.captures * 5 : -coup.captures * 5);
-                annuler_coup(plateau, &coup, nb_cases);
+                annuler_coup(plateau, &coup);
 
                 if (maximisant) {
                     if (score > meilleur_score) meilleur_score = score;
@@ -361,10 +373,17 @@ int minimax(Plateau* plateau, int joueur, int profondeur, int alpha, int beta, i
     }
 
 FIN_COUPE:
+    if (!coup_trouve) {
+        int terminal = evaluer_fin_de_partie(plateau, joueur);
+        if (terminal == SCORE_VICTOIRE || terminal == SCORE_DEFAITE) {
+            meilleur_score = terminal;
+        } else {
+            int eval = (joueur == 1)
+                ? evaluer_plateau(plateau, joueur)
+                : evaluer_plateau_famine(plateau, joueur);
+            meilleur_score = eval;
+        }
+    }
     ajouter_transpo(joueur, key, profondeur, meilleur_score);
     return meilleur_score;
 }
-
-
-
-

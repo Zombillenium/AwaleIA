@@ -1,7 +1,7 @@
 #include "jeu.h"
 #include <stdlib.h>
 
-int capturer(Plateau* plateau, Plateau* derniere, int nb_cases) {
+int capturer(Plateau* plateau, Plateau* derniere) {
     if (!derniere) return 0;
     int total_capture = 0;
     Plateau* courante = derniere;
@@ -11,7 +11,7 @@ int capturer(Plateau* plateau, Plateau* derniere, int nb_cases) {
         if (total == 2 || total == 3) {
             total_capture += total;
             courante->R = courante->B = courante->T = 0;
-            courante = case_precedente(plateau, courante, nb_cases);
+            courante = case_precedente(plateau, courante);  // plus de nb_cases
         } else break;
     }
     return total_capture;
@@ -103,7 +103,7 @@ Plateau* distribuer(Plateau* depart, int couleur, int joueur, int mode_transp) {
 
 
 // Joue un coup sur le plateau sans le copier
-Plateau* jouer_coup(Plateau* plateau, Coup* c, int nb_cases) {
+Plateau* jouer_coup(Plateau* plateau, Coup* c) {
     Plateau* p = plateau;
     for (int i = 0; i < nb_cases; i++) {
         c->R[i] = p->R;
@@ -115,12 +115,12 @@ Plateau* jouer_coup(Plateau* plateau, Coup* c, int nb_cases) {
     Plateau* depart = trouver_case(plateau, c->case_depart);
     Plateau* derniere = distribuer(depart, c->couleur, c->joueur, c->mode_transp);
     c->derniere = derniere;
-    c->captures = capturer(plateau, derniere, nb_cases);
+    c->captures = capturer(plateau, derniere);
     return derniere;
 }
 
 // Annule le dernier coup en restaurant l’état sauvegardé
-void annuler_coup(Plateau* plateau, Coup* c, int nb_cases) {
+void annuler_coup(Plateau* plateau, Coup* c) {
     Plateau* p = plateau;
     for (int i = 0; i < nb_cases; i++) {
         p->R = c->R[i];
@@ -128,4 +128,74 @@ void annuler_coup(Plateau* plateau, Coup* c, int nb_cases) {
         p->T = c->T[i];
         p = p->caseSuiv;
     }
+}
+
+int verifier_conditions_fin(Partie* partie) {
+    int totalJ1 = total_graines_joueur(partie->plateau, 1);
+    int totalJ2 = total_graines_joueur(partie->plateau, 2);
+    int total = totalJ1 + totalJ2;
+
+    // Cas famine J1 → J2 récupère tout
+    if (totalJ1 == 0 && totalJ2 > 0) {
+        partie->scores[1] += totalJ2;
+        return 1;
+    }
+
+    // Cas famine J2 → J1 récupère tout
+    if (totalJ2 == 0 && totalJ1 > 0) {
+        partie->scores[0] += totalJ1;
+        return 1;
+    }
+
+    if (partie->scores[0] >= 49) {
+        return 1;
+    }
+    if (partie->scores[1] >= 49) {
+        return 1;
+    }
+
+    if (partie->scores[0] == 40 && partie->scores[1] == 40) {
+        return 1; // match nul
+    }
+
+    // Trop peu de graines → égalité ou comparaison des scores
+    if (total < 10) {
+        return 1;
+    }
+
+    return 0;
+}
+
+// pour les fonctions d'évaluation, retourne :
+// +1  si joueur gagne
+// -1  si joueur perd
+//  0  si partie non terminée
+int evaluer_fin_de_partie(Plateau* plateau, int joueur) {
+
+    int totalJ1 = total_graines_joueur(plateau, 1);
+    int totalJ2 = total_graines_joueur(plateau, 2);
+    int total = totalJ1 + totalJ2;
+
+    // famine (joueur 1 affamé)
+    if (totalJ1 == 0 && totalJ2 > 0) {
+        return (joueur == 1) ? SCORE_DEFAITE : SCORE_VICTOIRE;
+    }
+
+    // famine (joueur 2 affamé)
+    if (totalJ2 == 0 && totalJ1 > 0) {
+        return (joueur == 2) ? SCORE_DEFAITE : SCORE_VICTOIRE;
+    }
+
+    // fin classique : peu de graines
+    if (total < 10) {
+        if (totalJ1 > totalJ2) 
+            return (joueur == 1) ? SCORE_VICTOIRE : SCORE_DEFAITE;
+
+        if (totalJ2 > totalJ1) 
+            return (joueur == 2) ? SCORE_VICTOIRE : SCORE_DEFAITE;
+
+        return 0; // égalité
+    }
+
+    return 0; // partie non terminée
 }

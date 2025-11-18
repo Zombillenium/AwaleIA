@@ -2,25 +2,19 @@
 #include <stdlib.h>
 #include <time.h>
 #include <sys/time.h>
+#include <omp.h>
+
 #include "evaluation.h"
 #include "plateau.h"
 #include "jeu.h"
 #include "ia.h"
-#include <omp.h>
 
-
-#define TEMPS_MAX 2.0  // Temps max par coup (en secondes)
-
-// --- Déclarations ---
-int total_graines(Plateau* plateau, int nb_cases);
-int total_graines_joueur(Plateau* plateau, int nb_cases, int joueur);
-
+#define TEMPS_MAX 0.5  // Temps max par coup (en secondes)
 
 // --- Fonctions ---
 void initialiser_partie(Partie* partie);
 int jouer_tour(Partie* partie);
 void afficher_resultats(Partie* partie);
-int verifier_conditions_fin(Partie* partie);
 void executer_coup(Partie* partie, int joueur, int best_case, int best_color, int best_mode);
 
 // ============================
@@ -28,74 +22,88 @@ void executer_coup(Partie* partie, int joueur, int best_case, int best_color, in
 // ============================
 
 int main() {
+
     initialiser_zobrist();
+    initialiser_transpo_lock();
+    initialiser_killer_moves();
+
     printf("💻 OpenMP détecte %d threads disponibles.\n", omp_get_max_threads());
+
     Partie partie;
     initialiser_partie(&partie);
-    initialiser_transpo_lock();
 
-    printf("=== Début du match IA vs IA ===\n");
-    afficher_plateau(partie.plateau, partie.nb_cases);
+    printf("=== Début du match IA (classique) vs IA (famine) ===\n");
+    afficher_plateau(partie.plateau);
 
     while (1) {
-        if (!jouer_tour(&partie)) break; // Retourne 0 si fin de partie
-        if (verifier_conditions_fin(&partie)) break;
+        if (!jouer_tour(&partie)) break;              // Fin si aucun coup possible
+        if (verifier_conditions_fin(&partie)) break;  // Fin de partie centralisée dans jeu.c
+
         printf("----------------------------------------\n");
         partie.tour = 1 - partie.tour;
     }
 
     afficher_resultats(&partie);
-    liberer_plateau(partie.plateau, partie.nb_cases);
+    liberer_plateau(partie.plateau);
     return 0;
 }
 
-
-
-
+// ============================
+//       INITIALISATION
+// ============================
 
 void initialiser_partie(Partie* partie) {
-    partie->nb_cases = 16;
-    partie->plateau = creer_plateau(partie->nb_cases);
+    partie->plateau = creer_plateau();   // plus de nb_cases
     partie->scores[0] = partie->scores[1] = 0;
     partie->tour = 0;
-    initialiser_killer_moves();
 }
 
-
-
-
+// ============================
+//       TOUR DE JEU
+// ============================
 
 int jouer_tour(Partie* partie) {
+
     int joueur = partie->tour + 1;
     char* noms[2] = {"J1 (classique)", "J2 (famine)"};
+
     printf("\n=== Tour de %s ===\n", noms[partie->tour]);
 
-    int best_case = -1, best_color = -1, best_mode = 0;
+    int best_case = -1;
+    int best_color = -1;
+    int best_mode = 0;
 
-    // --- Sélection du meilleur coup ---
     int ok = choisir_meilleur_coup(partie, joueur, &best_case, &best_color, &best_mode);
+
     if (!ok) {
-        printf("⚠️  Aucun coup possible pour %s.\n", noms[partie->tour]);
+        printf("⚠️  Aucun coup possible pour %s\n", noms[partie->tour]);
         return 0;
     }
 
-    // --- Exécution du coup ---
     executer_coup(partie, joueur, best_case, best_color, best_mode);
-    afficher_plateau(partie->plateau, partie->nb_cases);
+    afficher_plateau(partie->plateau);
 
     printf("Scores -> J1: %d | J2: %d\n", partie->scores[0], partie->scores[1]);
+
     int evalJ1 = evaluer_plateau(partie->plateau, 1);
     int evalJ2 = evaluer_plateau_famine(partie->plateau, 2);
+
     printf("Évaluation -> J1: %d | J2: %d\n", evalJ1, evalJ2);
     return 1;
 }
 
+// ============================
+//   EXECUTION DU COUP
+// ============================
 
 void executer_coup(Partie* partie, int joueur, int best_case, int best_color, int best_mode) {
+
     char* noms[2] = {"J1 (classique)", "J2 (famine)"};
     Plateau* c = trouver_case(partie->plateau, best_case);
+
     Plateau* derniere = distribuer(c, best_color, joueur, best_mode);
-    int captures = capturer(partie->plateau, derniere, partie->nb_cases);
+    int captures = capturer(partie->plateau, derniere);
+
     partie->scores[joueur - 1] += captures;
 
     printf("👉 %s joue ", noms[joueur - 1]);
@@ -103,36 +111,20 @@ void executer_coup(Partie* partie, int joueur, int best_case, int best_color, in
     else if (best_color == 2) printf("%dB", best_case);
     else if (best_color == 3 && best_mode == 1) printf("%dTR", best_case);
     else if (best_color == 3 && best_mode == 2) printf("%dTB", best_case);
+
     printf(" et capture %d graines.\n", captures);
 }
 
-
-int verifier_conditions_fin(Partie* partie) {
-    int totalJ1 = total_graines_joueur(partie->plateau, partie->nb_cases, 1);
-    int totalJ2 = total_graines_joueur(partie->plateau, partie->nb_cases, 2);
-    int total = totalJ1 + totalJ2;
-
-    if (totalJ1 == 0 && totalJ2 > 0) {
-        printf("💀 Famine ! J2 récupère toutes les graines restantes (%d).\n", totalJ2);
-        partie->scores[1] += totalJ2;
-        return 1;
-    }
-    if (totalJ2 == 0 && totalJ1 > 0) {
-        printf("💀 Famine ! J1 récupère toutes les graines restantes (%d).\n", totalJ1);
-        partie->scores[0] += totalJ1;
-        return 1;
-    }
-    if (total < 10) {
-        printf("⚖️  Moins de 10 graines restantes — fin de la partie.\n");
-        return 1;
-    }
-    return 0;
-}
-
+// ============================
+//        RESULTATS
+// ============================
 
 void afficher_resultats(Partie* partie) {
+
     printf("\n=== Fin de la partie ===\n");
-    printf("Score final -> J1: %d | J2: %d\n", partie->scores[0], partie->scores[1]);
+    printf("Score final -> J1: %d | J2: %d\n",
+           partie->scores[0], partie->scores[1]);
+
     if (partie->scores[0] > partie->scores[1])
         printf("🏆 Victoire de J1 (classique)\n");
     else if (partie->scores[1] > partie->scores[0])

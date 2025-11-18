@@ -1,0 +1,61 @@
+# === Dossiers ===
+SRC_DIR     = src
+INC_DIR     = include
+BUILD_DIR   = build
+BIN_DIR     = bin
+
+# === Noms des exécutables ===
+EXEC_MAIN    = $(BIN_DIR)/main
+EXEC_BATTLE  = $(BIN_DIR)/main_battle
+EXEC_MQTT    = $(BIN_DIR)/main_mqtt
+
+# === Compilateur ===
+CC = gcc
+
+# === Options de compilation ===
+CFLAGS = -Wall -Wextra -std=c11 -O3 -march=native -flto -funroll-loops -DNDEBUG -pipe -fopenmp -I$(INC_DIR)
+LDFLAGS = -lpaho-mqtt3cs -lpthread -lssl -lcrypto
+
+# === Fichiers sources ===
+SRC_COMMON  = plateau.c jeu.c evaluation.c ia.c tabletranspo.c
+
+SRC_MAIN    = main.c $(SRC_COMMON)
+SRC_BATTLE  = main_battle.c $(SRC_COMMON)
+SRC_MQTT    = main_MQTT.c $(SRC_COMMON)
+
+# === Génération automatique des .o ===
+OBJ_MAIN    = $(addprefix $(BUILD_DIR)/, $(SRC_MAIN:.c=.o))
+OBJ_BATTLE  = $(addprefix $(BUILD_DIR)/, $(SRC_BATTLE:.c=.o))
+OBJ_MQTT    = $(addprefix $(BUILD_DIR)/, $(SRC_MQTT:.c=.o))
+
+# === Règle par défaut ===
+all: $(EXEC_MAIN) $(EXEC_BATTLE) $(EXEC_MQTT)
+
+# === Compilation des exécutables ===
+$(EXEC_MAIN): $(OBJ_MAIN)
+	$(CC) $^ -o $@ $(CFLAGS)
+
+$(EXEC_BATTLE): $(OBJ_BATTLE)
+	$(CC) $^ -o $@ $(CFLAGS)
+
+$(EXEC_MQTT): $(OBJ_MQTT)
+	$(CC) $^ -o $@ $(CFLAGS) $(LDFLAGS)
+
+# === Compilation générique dans build/ ===
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# === Création des répertoires ===
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+	mkdir -p $(BIN_DIR)
+
+# === Nettoyage ===
+clean:
+	rm -rf $(BUILD_DIR)
+
+mrproper: clean
+	rm -rf $(BIN_DIR)
+
+run-mqtt: $(EXEC_MQTT)
+	./$(EXEC_MQTT) 0

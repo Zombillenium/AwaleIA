@@ -1,5 +1,6 @@
 #include "evaluation.h"
 #include "plateau.h"  
+#include "jeu.h"
 
 int evaluer_plateau(Plateau* plateau, int joueur) {
     int totalJ = 0, totalA = 0;
@@ -43,8 +44,15 @@ int evaluer_plateau(Plateau* plateau, int joueur) {
 
 
 int evaluer_plateau_famine(Plateau* plateau, int joueur) {
-    if (!plateau) return 500;
 
+    if (!plateau) return 0;
+
+    // 1) Vérification de victoire réelle
+    int res = evaluer_fin_de_partie(plateau, joueur);
+    if (res == +1) return SCORE_VICTOIRE;
+    if (res == -1) return SCORE_DEFAITE;
+
+    // --- Heuristique famine classique ---
     int grainesJ = 0, grainesA = 0;
     int casesVidesJ = 0, casesVidesA = 0;
     int coupsJ = 0, coupsA = 0;
@@ -54,6 +62,7 @@ int evaluer_plateau_famine(Plateau* plateau, int joueur) {
     Plateau* p = plateau;
     do {
         int total = p->R + p->B + p->T;
+
         if (case_du_joueur(p->caseN, joueur)) {
             grainesJ += total;
             if (total == 0) casesVidesJ++;
@@ -67,58 +76,49 @@ int evaluer_plateau_famine(Plateau* plateau, int joueur) {
             if (total == 2 || total == 3) captA++;
             if (total == 1) famine1A++;
         }
+
         p = p->caseSuiv;
     } while (p != plateau);
 
     float total = grainesJ + grainesA;
-    float phase = 1.0f - (total / 48.0f);  // 0 = début, 1 = fin
+    float phase = 1.0f - (total / 48.0f);
 
     float score = 0.0f;
 
     // === noyau famine ===
-    // plus de vide et de cases à 1 graine chez l’adversaire = bonne pression
     score += 40.0f * (casesVidesA - casesVidesJ);
     score += 25.0f * (famine1A - famine1J);
 
-    // === mobilité et survie ===
+    // === mobilité et captures ===
     score += 10.0f * (coupsJ - coupsA);
     score += 10.0f * (captJ - captA);
 
     // === ressources ===
     score += 6.0f * (grainesJ - grainesA);
 
-    // === pression de phase : fin de partie plus tranchée ===
+    // === pression fin de partie ===
     score += phase * 20.0f * ((casesVidesA + famine1A) - (casesVidesJ + famine1J));
 
-    // === bonus de situation ===
+    // === bonus si adversaire très faible ===
     if (grainesA <= 6) score += (30 - 3 * grainesA);
     if (coupsA <= 2)   score += 25;
     if (casesVidesA >= 6) score += 20;
 
-    // === malus survie personnelle ===
+    // === malus si nous sommes faibles ===
     if (grainesJ <= 6) score -= (30 - 3 * grainesJ);
     if (coupsJ <= 2)   score -= 25;
     if (casesVidesJ >= 6) score -= 20;
 
-    // si on domine clairement, passer en mode agressif
+    // === agressif si on domine ===
     if (grainesA < grainesJ - 6) {
         score += 15.0f * (captJ - captA);
         score += 8.0f  * (coupsJ - coupsA);
     }
 
-    // si on mène au score total, accepter plus de risque
+    // === prise de risque si en avance ===
     if (grainesJ > grainesA + 8) {
         score += 0.5f * (grainesJ - grainesA);
     }
-    
 
-    // === stabilisation : éviter saturation ===
-    if (score < -250) score = -250;
-    if (score > 250)  score = 250;
-
-    int eval = (int)(500 + (score * 2.0f));  // plage [0–1000]
-    if (eval < 1) eval = 1;
-    if (eval > 1000) eval = 1000;
-    
-    return eval;
+    return (int)score;
 }
