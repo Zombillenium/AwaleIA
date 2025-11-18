@@ -5,9 +5,14 @@
 #include "tabletranspo.h"
 #include "jeu.h"
 
+// Forward declaration pour éviter dépendance circulaire
+struct ParametresEvaluation;
+typedef struct ParametresEvaluation ParametresEvaluation;
+
 // --- Fonctions principales ---
 void meilleur_coup(Plateau* plateau, int joueur); // si tu ne l'utilises pas, ce n'est pas grave
 int minimax(Plateau* plateau, int joueur, int profondeur, int alpha, int beta, int maximisant);
+int minimax_tune(Plateau* plateau, int joueur, int profondeur, int alpha, int beta, int maximisant, ParametresEvaluation* params);
 int choisir_meilleur_coup(Partie* partie, int joueur, int* best_case, int* best_color, int* best_mode);
 
 // --- Fonctions utilitaires ---

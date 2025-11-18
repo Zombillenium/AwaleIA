@@ -4,6 +4,7 @@
 #include "jeu.h"
 #include "evaluation.h"
 #include "tabletranspo.h"
+#include "tuning.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -298,17 +299,39 @@ int choisir_meilleur_coup(Partie* partie, int joueur,
 //        MINIMAX
 // =============================
 
-int minimax(Plateau* plateau, int joueur, int profondeur,
-            int alpha, int beta, int maximisant) {
+// Version avec paramètres tunés
+int minimax_tune(Plateau* plateau, int joueur, int profondeur,
+                 int alpha, int beta, int maximisant, ParametresEvaluation* params) {
 
     unsigned long long key = hash_plateau(plateau);
     int val_cache;
     if (chercher_transpo(joueur, key, profondeur, &val_cache)) return val_cache;
 
+    // === TERMINAISONS EXPLICITES (win-fast, lose-late) ===
+    int terminal = evaluer_fin_de_partie(plateau, joueur);
+    if (terminal == SCORE_VICTOIRE) {
+        int bonus = profondeur * 50;
+        ajouter_transpo(joueur, key, profondeur, SCORE_VICTOIRE - bonus);
+        return SCORE_VICTOIRE - bonus;
+    }
+    if (terminal == SCORE_DEFAITE) {
+        int malus = profondeur * 50;
+        ajouter_transpo(joueur, key, profondeur, SCORE_DEFAITE + malus);
+        return SCORE_DEFAITE + malus;
+    }
+
     if (profondeur == 0) {
-        int eval = (joueur  == 1)
-            ? evaluer_plateau(plateau, joueur)
-            : evaluer_plateau_famine(plateau, joueur);
+        // Utilisation des fonctions d'évaluation avec paramètres tunés
+        int eval;
+        if (params) {
+            eval = (joueur == 1)
+                ? evaluer_plateau_avance_tune(plateau, joueur, params)
+                : evaluer_plateau_famine_avance_tune(plateau, joueur, params);
+        } else {
+            eval = (joueur == 1)
+                ? evaluer_plateau_avance(plateau, joueur)
+                : evaluer_plateau_famine_avance(plateau, joueur);
+        }
         ajouter_transpo(joueur, key, profondeur, eval);
         return eval;
     }
@@ -317,7 +340,7 @@ int minimax(Plateau* plateau, int joueur, int profondeur,
     int coup_trouve = 0;
     int joueur_actuel = maximisant ? joueur : 3 - joueur;
 
-    // On essaie d’abord les killer moves
+    // On essaie d'abord les killer moves
     tester_killer_moves(plateau, joueur, joueur_actuel, profondeur,
                         &meilleur_score, &alpha, &beta, maximisant);
 
@@ -351,8 +374,8 @@ int minimax(Plateau* plateau, int joueur, int profondeur,
 
                 jouer_coup(plateau, &coup);
                 coup_trouve = 1;
-                int score = minimax(plateau, joueur, profondeur - 1,
-                                    alpha, beta, !maximisant);
+                int score = minimax_tune(plateau, joueur, profondeur - 1,
+                                        alpha, beta, !maximisant, params);
                 score += (maximisant ? coup.captures * 5 : -coup.captures * 5);
                 annuler_coup(plateau, &coup);
 
@@ -366,24 +389,41 @@ int minimax(Plateau* plateau, int joueur, int profondeur,
 
                 if (beta <= alpha) {
                     enregistrer_killer_move(profondeur, coup);
-                    goto FIN_COUPE;
+                    goto FIN_COUPE_TUNE;
                 }
             }
         }
     }
 
-FIN_COUPE:
+FIN_COUPE_TUNE:
     if (!coup_trouve) {
         int terminal = evaluer_fin_de_partie(plateau, joueur);
         if (terminal == SCORE_VICTOIRE || terminal == SCORE_DEFAITE) {
-            meilleur_score = terminal;
+            if (terminal == SCORE_VICTOIRE) {
+                meilleur_score = SCORE_VICTOIRE - profondeur * 50;
+            } else {
+                meilleur_score = SCORE_DEFAITE + profondeur * 50;
+            }
         } else {
-            int eval = (joueur == 1)
-                ? evaluer_plateau(plateau, joueur)
-                : evaluer_plateau_famine(plateau, joueur);
+            int eval;
+            if (params) {
+                eval = (joueur == 1)
+                    ? evaluer_plateau_avance_tune(plateau, joueur, params)
+                    : evaluer_plateau_famine_avance_tune(plateau, joueur, params);
+            } else {
+                eval = (joueur == 1)
+                    ? evaluer_plateau_avance(plateau, joueur)
+                    : evaluer_plateau_famine_avance(plateau, joueur);
+            }
             meilleur_score = eval;
         }
     }
     ajouter_transpo(joueur, key, profondeur, meilleur_score);
     return meilleur_score;
+}
+
+// Version standard (sans paramètres tunés)
+int minimax(Plateau* plateau, int joueur, int profondeur,
+            int alpha, int beta, int maximisant) {
+    return minimax_tune(plateau, joueur, profondeur, alpha, beta, maximisant, NULL);
 }

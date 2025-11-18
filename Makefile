@@ -8,6 +8,7 @@ BIN_DIR     = bin
 EXEC_MAIN    = $(BIN_DIR)/main
 EXEC_BATTLE  = $(BIN_DIR)/main_battle
 EXEC_MQTT    = $(BIN_DIR)/main_mqtt
+EXEC_TUNING  = $(BIN_DIR)/main_tuning
 
 # === Compilateur ===
 CC = gcc
@@ -22,14 +23,16 @@ SRC_COMMON  = plateau.c jeu.c evaluation.c ia.c tabletranspo.c
 SRC_MAIN    = main.c $(SRC_COMMON)
 SRC_BATTLE  = main_battle.c $(SRC_COMMON)
 SRC_MQTT    = main_MQTT.c $(SRC_COMMON)
+SRC_TUNING  = main_tuning.c $(SRC_COMMON) tuning.c
 
 # === Génération automatique des .o ===
 OBJ_MAIN    = $(addprefix $(BUILD_DIR)/, $(SRC_MAIN:.c=.o))
 OBJ_BATTLE  = $(addprefix $(BUILD_DIR)/, $(SRC_BATTLE:.c=.o))
 OBJ_MQTT    = $(addprefix $(BUILD_DIR)/, $(SRC_MQTT:.c=.o))
+OBJ_TUNING  = $(addprefix $(BUILD_DIR)/, $(SRC_TUNING:.c=.o))
 
 # === Règle par défaut ===
-all: $(EXEC_MAIN) $(EXEC_BATTLE) $(EXEC_MQTT)
+all: $(EXEC_MAIN) $(EXEC_BATTLE) $(EXEC_MQTT) $(EXEC_TUNING)
 
 # === Compilation des exécutables ===
 $(EXEC_MAIN): $(OBJ_MAIN)
@@ -40,6 +43,9 @@ $(EXEC_BATTLE): $(OBJ_BATTLE)
 
 $(EXEC_MQTT): $(OBJ_MQTT)
 	$(CC) $^ -o $@ $(CFLAGS) $(LDFLAGS)
+
+$(EXEC_TUNING): $(OBJ_TUNING)
+	$(CC) $^ -o $@ $(CFLAGS)
 
 # === Compilation générique dans build/ ===
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
