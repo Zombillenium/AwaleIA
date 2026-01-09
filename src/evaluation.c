@@ -80,8 +80,7 @@ int evaluer_plateau_famine(Plateau* plateau, int joueur) {
         p = p->caseSuiv;
     } while (p != plateau);
 
-    float total = grainesJ + grainesA;
-    float phase = 1.0f - (total / 48.0f);
+    float phase = calculer_phase_jeu(plateau); // Utiliser la fonction améliorée
 
     float score = 0.0f;
 
@@ -90,34 +89,70 @@ int evaluer_plateau_famine(Plateau* plateau, int joueur) {
     score += 25.0f * (famine1A - famine1J);
 
     // === mobilité et captures ===
-    score += 10.0f * (coupsJ - coupsA);
-    score += 10.0f * (captJ - captA);
+    // Pour parties longues, mobilité plus importante en début
+    float poids_mobilite = 1.2f - phase * 0.4f; // Plus important en début
+    score += poids_mobilite * 10.0f * (coupsJ - coupsA);
+    // Captures moins critiques en début de partie longue
+    float poids_captures = 0.85f + phase * 0.15f;
+    score += poids_captures * 10.0f * (captJ - captA);
 
     // === ressources ===
-    score += 6.0f * (grainesJ - grainesA);
+    // Ressources importantes pour tenir sur la longueur
+    float poids_ressources = 0.8f + phase * 0.4f;
+    score += poids_ressources * 6.0f * (grainesJ - grainesA);
 
     // === pression fin de partie ===
-    score += phase * 20.0f * ((casesVidesA + famine1A) - (casesVidesJ + famine1J));
+    // Transition plus douce pour parties longues
+    score += phase * phase * 20.0f * ((casesVidesA + famine1A) - (casesVidesJ + famine1J));
 
     // === bonus si adversaire très faible ===
-    if (grainesA <= 6) score += (30 - 3 * grainesA);
-    if (coupsA <= 2)   score += 25;
-    if (casesVidesA >= 6) score += 20;
+    // Pour parties longues, être plus patient - seuils ajustés selon phase
+    float seuil_graines = 6.0f - phase * 1.5f;
+    float seuil_coups = 2.0f - phase * 0.5f;
+    float seuil_cases = 6.0f - phase * 1.0f;
+    
+    if (grainesA <= (int)seuil_graines) {
+        float bonus = (30 - 3 * grainesA) * (0.7f + phase * 0.3f);
+        score += bonus;
+    }
+    if (coupsA <= (int)seuil_coups) {
+        float bonus = 25.0f * (0.7f + phase * 0.3f);
+        score += bonus;
+    }
+    if (casesVidesA >= (int)seuil_cases) {
+        float bonus = 20.0f * (0.7f + phase * 0.3f);
+        score += bonus;
+    }
 
     // === malus si nous sommes faibles ===
-    if (grainesJ <= 6) score -= (30 - 3 * grainesJ);
-    if (coupsJ <= 2)   score -= 25;
-    if (casesVidesJ >= 6) score -= 20;
+    if (grainesJ <= (int)seuil_graines) {
+        float malus = (30 - 3 * grainesJ) * (0.7f + phase * 0.3f);
+        score -= malus;
+    }
+    if (coupsJ <= (int)seuil_coups) {
+        float malus = 25.0f * (0.7f + phase * 0.3f);
+        score -= malus;
+    }
+    if (casesVidesJ >= (int)seuil_cases) {
+        float malus = 20.0f * (0.7f + phase * 0.3f);
+        score -= malus;
+    }
 
     // === agressif si on domine ===
-    if (grainesA < grainesJ - 6) {
-        score += 15.0f * (captJ - captA);
-        score += 8.0f  * (coupsJ - coupsA);
+    // Plus agressif seulement en fin de partie ou si on domine clairement
+    float seuil_domination = 6.0f - phase * 2.0f;
+    if (grainesA < grainesJ - seuil_domination) {
+        float agressivite = 0.6f + phase * 0.4f;
+        score += agressivite * 15.0f * (captJ - captA);
+        score += agressivite * 8.0f * (coupsJ - coupsA);
     }
 
     // === prise de risque si en avance ===
-    if (grainesJ > grainesA + 8) {
-        score += 0.5f * (grainesJ - grainesA);
+    // Plus conservateur en début de partie longue
+    float seuil_avance = 8.0f + phase * 2.0f;
+    if (grainesJ > grainesA + seuil_avance) {
+        float risque = 0.3f + phase * 0.2f;
+        score += risque * (grainesJ - grainesA);
     }
 
     return (int)score;
@@ -130,7 +165,12 @@ int evaluer_plateau_famine(Plateau* plateau, int joueur) {
 float calculer_phase_jeu(Plateau* plateau) {
     int total = total_graines(plateau);
     // Phase 0.0 = début (48 graines), 1.0 = fin (0 graines)
+    // Pour parties longues (400 coups max), phase progresse plus lentement
+    // pour mieux refléter les phases intermédiaires plus longues
     float phase = 1.0f - (total / 48.0f);
+    // Ajustement : phase progresse plus lentement (carré pour ralentir)
+    // Mélange linéaire (20%) et quadratique (80%) pour une transition plus douce
+    phase = phase * phase * 0.8f + phase * 0.2f;
     if (phase < 0.0f) phase = 0.0f;
     if (phase > 1.0f) phase = 1.0f;
     return phase;
@@ -215,27 +255,35 @@ int evaluer_plateau_avance(Plateau* plateau, int joueur) {
     float score = 0.0f;
     
     // === RESSOURCES (pondération selon phase) ===
-    float poids_ressources = 1.0f + phase * 0.5f; // Plus important en fin de partie
+    // Pour parties longues (400 coups), ressources importantes tout au long
+    float poids_ressources = 1.0f + phase * 0.6f; // Plus important en fin, mais aussi en milieu
     score += poids_ressources * 3.0f * totalJ;
     score -= poids_ressources * 2.0f * totalA;
     
     // === MOBILITÉ (pondération selon phase) ===
-    float poids_mobilite = 2.0f - phase * 1.0f; // Plus important en début de partie
+    // Pour parties longues, mobilité critique en début/milieu (plus de temps pour construire)
+    float poids_mobilite = 2.5f - phase * 1.2f; // Augmenté de 2.0 → 2.5 pour début
     score += poids_mobilite * 4.0f * (coupsLegauxJ - coupsLegauxA);
     
     // === CAPTURES IMMINENTES ===
-    score += 6.6f * (casesCapturablesJ - casesCapturablesA); // Tuned: 6.00 → 6.60
+    // Légèrement réduit en début de partie longue (moins critique qu'en partie courte)
+    float poids_captures = 0.8f + phase * 0.2f; // 0.8 en début, 1.0 en fin
+    score += poids_captures * 6.6f * (casesCapturablesJ - casesCapturablesA);
     
     // === GRAINES TRANSPARENTES ===
     score += 1.5f * (transJ - transA);
     
     // === PATTERNS BONUS/MALUS ===
     if (menace_famine) score += 40.0f; // Menace de famine = très bon (Tuned: 50.00 → 40.00)
-    score -= 15.0f * cases_critiques_j; // Cases critiques = vulnérabilité
-    score += 15.0f * cases_critiques_a; // Adversaire vulnérable = bon
+    // Pour parties longues, être moins pénalisé par cases critiques en début
+    float poids_critiques = 0.8f + phase * 0.2f; // Moins pénalisant en début
+    score -= poids_critiques * 15.0f * cases_critiques_j; // Cases critiques = vulnérabilité
+    score += poids_critiques * 15.0f * cases_critiques_a; // Adversaire vulnérable = bon
     
     // === CASES VIDES (pattern important) ===
-    score += 8.0f * (casesVidesA - casesVidesJ);
+    // Plus important en fin de partie pour parties longues
+    float poids_vides = 0.7f + phase * 0.3f; // Moins important en début
+    score += poids_vides * 8.0f * (casesVidesA - casesVidesJ);
     
     // === Mise à l'échelle dans [1, 1000] ===
     if (score < -200.0f) score = -200.0f;
@@ -304,17 +352,22 @@ int evaluer_plateau_famine_avance(Plateau* plateau, int joueur) {
     score += 25.0f * (famine1A - famine1J);
 
     // === MOBILITÉ vs RESSOURCES (selon phase) ===
-    float poids_mobilite = 2.0f - phase * 1.2f; // Priorité mobilité en début
-    float poids_ressources = 0.5f + phase * 1.0f; // Priorité ressources en fin
+    // Pour parties longues (400 coups), mobilité critique en début pour éviter blocage
+    float poids_mobilite = 2.3f - phase * 1.3f; // Augmenté de 2.0 → 2.3 pour début
+    // Ressources importantes pour tenir sur la longueur
+    float poids_ressources = 0.6f + phase * 1.1f; // Légèrement augmenté
     
     score += poids_mobilite * 12.0f * (coupsLegauxJ - coupsLegauxA);
     score += poids_ressources * 8.0f * (grainesJ - grainesA);
     
     // === CAPTURES ===
-    score += 12.0f * (captJ - captA);
+    // Légèrement réduit en début de partie longue
+    float poids_captures = 0.85f + phase * 0.15f; // 0.85 en début, 1.0 en fin
+    score += poids_captures * 12.0f * (captJ - captA);
 
     // === PRESSION FIN DE PARTIE ===
-    score += phase * 25.0f * ((casesVidesA + famine1A) - (casesVidesJ + famine1J));
+    // Transition plus douce pour parties longues
+    score += phase * phase * 25.0f * ((casesVidesA + famine1A) - (casesVidesJ + famine1J));
 
     // === PATTERNS BONUS/MALUS ===
     if (menace_famine) score += 60.0f; // Menace de famine = excellent
@@ -322,24 +375,53 @@ int evaluer_plateau_famine_avance(Plateau* plateau, int joueur) {
     score += 20.0f * cases_critiques_a; // Adversaire vulnérable = excellent
     
     // === BONUS SI ADVERSAIRE TRÈS FAIBLE ===
-    if (grainesA <= 6) score += (35 - 3 * grainesA);
-    if (coupsLegauxA <= 2) score += 30;
-    if (casesVidesA >= 6) score += 25;
+    // Pour parties longues, être plus patient - seuils ajustés selon phase
+    float seuil_graines = 6.0f - phase * 1.5f; // Plus patient en début (seuil plus bas)
+    float seuil_coups = 2.0f - phase * 0.5f;   // Plus patient en début
+    float seuil_cases = 6.0f - phase * 1.0f;  // Plus patient en début
+    
+    if (grainesA <= (int)seuil_graines) {
+        float bonus = (35 - 3 * grainesA) * (0.7f + phase * 0.3f); // Moins agressif en début
+        score += bonus;
+    }
+    if (coupsLegauxA <= (int)seuil_coups) {
+        float bonus = 30.0f * (0.7f + phase * 0.3f); // Moins agressif en début
+        score += bonus;
+    }
+    if (casesVidesA >= (int)seuil_cases) {
+        float bonus = 25.0f * (0.7f + phase * 0.3f); // Moins agressif en début
+        score += bonus;
+    }
 
     // === MALUS SI NOUS SOMMES FAIBLES ===
-    if (grainesJ <= 6) score -= (35 - 3 * grainesJ);
-    if (coupsLegauxJ <= 2) score -= 30;
-    if (casesVidesJ >= 6) score -= 25;
+    if (grainesJ <= (int)seuil_graines) {
+        float malus = (35 - 3 * grainesJ) * (0.7f + phase * 0.3f);
+        score -= malus;
+    }
+    if (coupsLegauxJ <= (int)seuil_coups) {
+        float malus = 30.0f * (0.7f + phase * 0.3f);
+        score -= malus;
+    }
+    if (casesVidesJ >= (int)seuil_cases) {
+        float malus = 25.0f * (0.7f + phase * 0.3f);
+        score -= malus;
+    }
 
     // === AGRESSIF SI ON DOMINE ===
-    if (grainesA < grainesJ - 6) {
-        score += 18.0f * (captJ - captA);
-        score += 10.0f * (coupsLegauxJ - coupsLegauxA);
+    // Plus agressif seulement en fin de partie ou si on domine clairement
+    float seuil_domination = 6.0f - phase * 2.0f; // Plus patient en début
+    if (grainesA < grainesJ - seuil_domination) {
+        float agressivite = 0.6f + phase * 0.4f; // Plus agressif en fin
+        score += agressivite * 18.0f * (captJ - captA);
+        score += agressivite * 10.0f * (coupsLegauxJ - coupsLegauxA);
     }
 
     // === PRISE DE RISQUE SI EN AVANCE ===
-    if (grainesJ > grainesA + 8) {
-        score += 0.6f * (grainesJ - grainesA);
+    // Plus conservateur en début de partie longue
+    float seuil_avance = 8.0f + phase * 2.0f; // Plus patient en début (seuil plus haut)
+    if (grainesJ > grainesA + seuil_avance) {
+        float risque = 0.4f + phase * 0.2f; // Moins risqué en début
+        score += risque * (grainesJ - grainesA);
     }
 
     return (int)score;
