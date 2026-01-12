@@ -13,6 +13,16 @@
 #include <omp.h>
 #endif
 
+// Mode debug : 0 = désactivé (production), 1 = activé (développement)
+// IMPORTANT: Mettre à 0 pour les matchs avec l'arbitre (sinon risque de blocage sur stderr)
+#define IA_DEBUG_MODE 0
+
+#if IA_DEBUG_MODE
+    #define DEBUG_PRINT(...) do { fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0)
+#else
+    #define DEBUG_PRINT(...) ((void)0)
+#endif
+
 #define MAX_PROFONDEUR 32
 #define MAX_KILLERS 2
 
@@ -23,7 +33,7 @@ static Coup killer_moves[MAX_PROFONDEUR][MAX_KILLERS];
 #pragma omp threadprivate(killer_moves)
 #endif
 
-#define TEMPS_MAX 2.00  // Temps max par coup (en secondes)
+#define TEMPS_MAX 2.00  // Temps max par coup (en secondes) - doit être < 3s (timeout arbitre)
 
 // Variables globales pour la gestion du temps dans minimax
 static struct timeval temps_debut_minimax;
@@ -182,7 +192,7 @@ int choisir_meilleur_coup(Partie* partie, int joueur,
                               (maintenant.tv_usec - debut.tv_usec) / 1000000.0;
         
         if (temps_ecoule >= TEMPS_MAX) {
-            printf("⏱️ Temps max (%.3fs) atteint après %.3fs → arrêt.\n", 
+            DEBUG_PRINT("⏱️ Temps max (%.3fs) atteint après %.3fs → arrêt.\n", 
                    TEMPS_MAX, temps_ecoule);
             break;
         }
@@ -246,7 +256,7 @@ int choisir_meilleur_coup(Partie* partie, int joueur,
                 // Trop d'itérations, on sort de l'aspiration et on utilise les valeurs par défaut
                 alpha_root = -100000;
                 beta_root = 100000;
-                printf(" ⚠️ Limite d'aspiration atteinte, utilisation de la fenêtre complète\n");
+                DEBUG_PRINT(" ⚠️ Limite d'aspiration atteinte, utilisation de la fenêtre complète\n");
             }
 
             best_case_temp = -1; best_color_temp = -1; best_mode_temp = 0;
@@ -277,7 +287,7 @@ int choisir_meilleur_coup(Partie* partie, int joueur,
                     #pragma omp critical
                     #endif
                     {
-                        printf("⏱️ Temps max atteint avant calcul du coup %d/%d → arrêt immédiat.\n", 
+                        DEBUG_PRINT("⏱️ Temps max atteint avant calcul du coup %d/%d → arrêt immédiat.\n", 
                                k+1, nmoves);
                     }
                     continue; // Passer au suivant au lieu de break (pour compatibilité OpenMP)
@@ -301,7 +311,7 @@ int choisir_meilleur_coup(Partie* partie, int joueur,
                     #pragma omp critical
                     #endif
                     {
-                        printf("⏱️ Temps max atteint avant minimax du coup %d/%d → arrêt immédiat.\n", 
+                        DEBUG_PRINT("⏱️ Temps max atteint avant minimax du coup %d/%d → arrêt immédiat.\n", 
                                k+1, nmoves);
                     }
                     liberer_plateau(copie);
@@ -338,49 +348,49 @@ int choisir_meilleur_coup(Partie* partie, int joueur,
 
             // Si le temps a été dépassé pendant les calculs, arrêter immédiatement
             if (temps_depasse) {
-                printf("⏱️ Temps max atteint pendant profondeur %d (%.3fs écoulé) → arrêt immédiat.\n",
+                DEBUG_PRINT("⏱️ Temps max atteint pendant profondeur %d (%.3fs écoulé) → arrêt immédiat.\n",
                        d, (t2.tv_sec - debut.tv_sec) + (t2.tv_usec - debut.tv_usec) / 1000000.0);
                 break;
             }
 
-            printf("🔹 Profondeur %d terminée en %.3fs | Meilleur coup : ",
+            DEBUG_PRINT("🔹 Profondeur %d terminée en %.3fs | Meilleur coup : ",
                    d, duree);
-            if (best_color_temp == 1) printf("%dR", best_case_temp);
-            else if (best_color_temp == 2) printf("%dB", best_case_temp);
-            else if (best_color_temp == 3 && best_mode_temp == 1) printf("%dTR", best_case_temp);
-            else if (best_color_temp == 3 && best_mode_temp == 2) printf("%dTB", best_case_temp);
-            printf(" (score %d)", meilleur_score_local);
+            if (best_color_temp == 1) DEBUG_PRINT("%dR", best_case_temp);
+            else if (best_color_temp == 2) DEBUG_PRINT("%dB", best_case_temp);
+            else if (best_color_temp == 3 && best_mode_temp == 1) DEBUG_PRINT("%dTR", best_case_temp);
+            else if (best_color_temp == 3 && best_mode_temp == 2) DEBUG_PRINT("%dTB", best_case_temp);
+            DEBUG_PRINT(" (score %d)", meilleur_score_local);
 
             // Détecter les scores extrêmes (victoire/défaite) et sortir immédiatement
             if (meilleur_score_local >= 50000 || meilleur_score_local <= -50000) {
-                printf(" (score extrême détecté)\n");
+                DEBUG_PRINT(" (score extrême détecté)\n");
                 break;
             }
 
             if (have_last && meilleur_score_local <= alpha_root) {
                 if (iterations_aspiration > MAX_ITERATIONS_ASPIRATION) {
-                    printf("\n");
+                    DEBUG_PRINT("\n");
                     break; // Sortir si on a dépassé la limite
                 }
                 ASP *= 2;
                 alpha_root = last_score - ASP;
                 beta_root  = last_score + ASP;
-                printf(" ⤵️ fail-low → [%d,%d]\n", alpha_root, beta_root);
-                fflush(stdout);
+                DEBUG_PRINT(" ⤵️ fail-low → [%d,%d]\n", alpha_root, beta_root);
+                fflush(stderr);
                 continue;
             } else if (have_last && meilleur_score_local >= beta_root) {
                 if (iterations_aspiration > MAX_ITERATIONS_ASPIRATION) {
-                    printf("\n");
+                    DEBUG_PRINT("\n");
                     break; // Sortir si on a dépassé la limite
                 }
                 ASP *= 2;
                 alpha_root = last_score - ASP;
                 beta_root  = last_score + ASP;
-                printf(" ⤴️ fail-high → [%d,%d]\n", alpha_root, beta_root);
-                fflush(stdout);
+                DEBUG_PRINT(" ⤴️ fail-high → [%d,%d]\n", alpha_root, beta_root);
+                fflush(stderr);
                 continue;
             } else {
-                printf("\n");
+                DEBUG_PRINT("\n");
                 break;
             }
         }
@@ -401,13 +411,13 @@ int choisir_meilleur_coup(Partie* partie, int joueur,
                                   (fin_profondeur.tv_usec - debut.tv_usec) / 1000000.0;
         
         if (temps_ecoule_fin >= TEMPS_MAX) {
-            printf("⏱️ Temps max (%.3fs) atteint après profondeur %d (%.3fs écoulé) → arrêt.\n",
+            DEBUG_PRINT("⏱️ Temps max (%.3fs) atteint après profondeur %d (%.3fs écoulé) → arrêt.\n",
                    TEMPS_MAX, d, temps_ecoule_fin);
             break;
         }
     }
 
-    printf("✅ Profondeur finale retenue : %d\n", profondeur_finale);
+    DEBUG_PRINT("✅ Profondeur finale retenue : %d\n", profondeur_finale);
     return (*best_case != -1);
 }
 

@@ -15,16 +15,16 @@ EXEC_EVAL    = $(BIN_DIR)/main_eval
 CC = gcc
 
 # === Options de compilation ===
-CFLAGS = -Wall -Wextra -std=c11 -O3 -march=native -flto -funroll-loops -DNDEBUG -pipe -fopenmp -I$(INC_DIR)
+CFLAGS = -Wall -Wextra -std=c11 -O3 -funroll-loops -DNDEBUG -pipe -fopenmp -I$(INC_DIR)
 LDFLAGS = -lpaho-mqtt3cs -lpthread -lssl -lcrypto
 
 # === Fichiers sources ===
-SRC_COMMON  = plateau.c jeu.c evaluation.c ia.c tabletranspo.c
+SRC_COMMON  = plateau.c jeu.c evaluation.c ia.c tabletranspo.c tuning.c
 
 SRC_MAIN    = main.c $(SRC_COMMON)
 SRC_BATTLE  = main_battle.c $(SRC_COMMON)
 SRC_MQTT    = main_MQTT.c $(SRC_COMMON)
-SRC_TUNING  = main_tuning.c $(SRC_COMMON) tuning.c
+SRC_TUNING  = main_tuning.c $(SRC_COMMON)
 SRC_EVAL    = main_eval.c $(SRC_COMMON)
 
 # === Génération automatique des .o ===
@@ -34,8 +34,11 @@ OBJ_MQTT    = $(addprefix $(BUILD_DIR)/, $(SRC_MQTT:.c=.o))
 OBJ_TUNING  = $(addprefix $(BUILD_DIR)/, $(SRC_TUNING:.c=.o))
 OBJ_EVAL    = $(addprefix $(BUILD_DIR)/, $(SRC_EVAL:.c=.o))
 
-# === Règle par défaut ===
-all: $(EXEC_MAIN) $(EXEC_BATTLE) $(EXEC_MQTT) $(EXEC_TUNING) $(EXEC_EVAL)
+# === Règle par défaut (sans MQTT) ===
+all: $(EXEC_MAIN) $(EXEC_BATTLE) $(EXEC_TUNING) $(EXEC_EVAL)
+
+# === Règle avec MQTT (nécessite paho-mqtt) ===
+all-mqtt: $(EXEC_MAIN) $(EXEC_BATTLE) $(EXEC_MQTT) $(EXEC_TUNING) $(EXEC_EVAL)
 
 # === Compilation des exécutables ===
 $(EXEC_MAIN): $(OBJ_MAIN)

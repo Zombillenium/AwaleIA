@@ -5,6 +5,12 @@
 #include <sys/time.h>
 #include <omp.h>
 
+#ifdef _WIN32
+#include <windows.h>  // Pour Sleep() sur Windows
+#else
+#include <unistd.h>   // Pour usleep() sur Unix
+#endif
+
 #include "evaluation.h"
 #include "plateau.h"
 #include "jeu.h"
@@ -19,6 +25,10 @@
 #define TYPE_IA_FAMINE 2
 #define TYPE_IA_MULTI_PHASES 3
 
+// Configuration de la vérification d'envoi
+#define MAX_RETRIES 3           // Nombre max de tentatives d'envoi
+#define RETRY_DELAY_US 50000    // Délai entre tentatives (50ms)
+
 // Variables globales
 static int mon_joueur = 1;  // 1 = J1, 2 = J2 (sera déterminé au début)
 static int type_ia = TYPE_IA_MULTI_PHASES;  // Type d'IA à utiliser
@@ -27,12 +37,19 @@ static int type_ia = TYPE_IA_MULTI_PHASES;  // Type d'IA à utiliser
 int parser_coup(const char* input, int* case_num, int* couleur, int* mode);
 int appliquer_coup_adverse(Partie* partie, int case_num, int couleur, int mode);
 void formater_coup(int case_num, int couleur, int mode, char* output);
+int envoyer_coup_avec_verification(const char* coup);
+int envoyer_result_avec_verification(const char* message);
+int verifier_buffer_stdout(void);
 
 // ============================
 //        PROGRAMME PRINCIPAL
 // ============================
 
 int main() {
+    // Désactiver le buffering pour communication immédiate avec l'arbitre
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stdin, NULL, _IONBF, 0);
+    
     // Initialisation des structures
     initialiser_zobrist();
     initialiser_transpo_lock();
@@ -67,10 +84,15 @@ int main() {
             break;  // Fin de l'entrée
         }
 
-        // Supprimer le saut de ligne
+        // Supprimer le saut de ligne (\n et \r pour compatibilité Windows)
         size_t len = strlen(ligne);
-        if (len > 0 && ligne[len - 1] == '\n') {
-            ligne[len - 1] = '\0';
+        while (len > 0 && (ligne[len - 1] == '\n' || ligne[len - 1] == '\r')) {
+            ligne[--len] = '\0';
+        }
+        
+        // Ignorer les lignes vides
+        if (len == 0) {
+            continue;
         }
 
         // Traiter le message "START"
@@ -86,15 +108,18 @@ int main() {
             
             if (!ok) {
                 // Aucun coup possible
-                printf("RESULT LIMIT %d %d\n", partie.scores[0], partie.scores[1]);
-                fflush(stdout);
+                char result_msg[64];
+                sprintf(result_msg, "RESULT LIMIT %d %d", partie.scores[0], partie.scores[1]);
+                envoyer_result_avec_verification(result_msg);
                 break;
             }
 
-            // Formater et envoyer le coup
+            // Formater et envoyer le coup avec vérification
             formater_coup(best_case, best_color, best_mode, dernier_coup_joue);
-            printf("%s\n", dernier_coup_joue);
-            fflush(stdout);
+            if (!envoyer_coup_avec_verification(dernier_coup_joue)) {
+                fprintf(stderr, "❌ Échec envoi du premier coup, abandon\n");
+                break;
+            }
 
             // Appliquer notre coup au plateau
             Plateau* c = trouver_case(partie.plateau, best_case);
@@ -105,14 +130,16 @@ int main() {
 
             // Vérifier fin de partie
             if (nb_coups >= MAX_COUPS) {
-                printf("RESULT LIMIT %d %d\n", partie.scores[0], partie.scores[1]);
-                fflush(stdout);
+                char result_msg[64];
+                sprintf(result_msg, "RESULT LIMIT %d %d", partie.scores[0], partie.scores[1]);
+                envoyer_result_avec_verification(result_msg);
                 break;
             }
 
             if (verifier_conditions_fin(&partie)) {
-                printf("RESULT %s %d %d\n", dernier_coup_joue, partie.scores[0], partie.scores[1]);
-                fflush(stdout);
+                char result_msg[64];
+                sprintf(result_msg, "RESULT %s %d %d", dernier_coup_joue, partie.scores[0], partie.scores[1]);
+                envoyer_result_avec_verification(result_msg);
                 break;
             }
 
@@ -124,8 +151,9 @@ int main() {
         int case_num = 0, couleur = 0, mode = 0;
         if (!parser_coup(ligne, &case_num, &couleur, &mode)) {
             // Coup invalide - envoyer RESULT avec disqualification
-            printf("RESULT LIMIT %d %d\n", partie.scores[0], partie.scores[1]);
-            fflush(stdout);
+            char result_msg[64];
+            sprintf(result_msg, "RESULT LIMIT %d %d", partie.scores[0], partie.scores[1]);
+            envoyer_result_avec_verification(result_msg);
             break;
         }
 
@@ -140,8 +168,9 @@ int main() {
         // Appliquer le coup de l'adversaire
         if (!appliquer_coup_adverse(&partie, case_num, couleur, mode)) {
             // Coup invalide
-            printf("RESULT LIMIT %d %d\n", partie.scores[0], partie.scores[1]);
-            fflush(stdout);
+            char result_msg[64];
+            sprintf(result_msg, "RESULT LIMIT %d %d", partie.scores[0], partie.scores[1]);
+            envoyer_result_avec_verification(result_msg);
             break;
         }
 
@@ -149,14 +178,16 @@ int main() {
 
         // Vérifier fin de partie après le coup adverse
         if (nb_coups >= MAX_COUPS) {
-            printf("RESULT LIMIT %d %d\n", partie.scores[0], partie.scores[1]);
-            fflush(stdout);
+            char result_msg[64];
+            sprintf(result_msg, "RESULT LIMIT %d %d", partie.scores[0], partie.scores[1]);
+            envoyer_result_avec_verification(result_msg);
             break;
         }
 
         if (verifier_conditions_fin(&partie)) {
-            printf("RESULT %s %d %d\n", dernier_coup_joue, partie.scores[0], partie.scores[1]);
-            fflush(stdout);
+            char result_msg[64];
+            sprintf(result_msg, "RESULT %s %d %d", dernier_coup_joue, partie.scores[0], partie.scores[1]);
+            envoyer_result_avec_verification(result_msg);
             break;
         }
 
@@ -169,15 +200,18 @@ int main() {
         
         if (!ok) {
             // Aucun coup possible
-            printf("RESULT LIMIT %d %d\n", partie.scores[0], partie.scores[1]);
-            fflush(stdout);
+            char result_msg[64];
+            sprintf(result_msg, "RESULT LIMIT %d %d", partie.scores[0], partie.scores[1]);
+            envoyer_result_avec_verification(result_msg);
             break;
         }
 
-        // Formater et envoyer le coup
+        // Formater et envoyer le coup avec vérification
         formater_coup(best_case, best_color, best_mode, dernier_coup_joue);
-        printf("%s\n", dernier_coup_joue);
-        fflush(stdout);
+        if (!envoyer_coup_avec_verification(dernier_coup_joue)) {
+            fprintf(stderr, "❌ Échec envoi du coup, abandon\n");
+            break;
+        }
 
         // Appliquer notre coup au plateau
         Plateau* c = trouver_case(partie.plateau, best_case);
@@ -188,14 +222,16 @@ int main() {
 
         // Vérifier fin de partie après notre coup
         if (nb_coups >= MAX_COUPS) {
-            printf("RESULT LIMIT %d %d\n", partie.scores[0], partie.scores[1]);
-            fflush(stdout);
+            char result_msg[64];
+            sprintf(result_msg, "RESULT LIMIT %d %d", partie.scores[0], partie.scores[1]);
+            envoyer_result_avec_verification(result_msg);
             break;
         }
 
         if (verifier_conditions_fin(&partie)) {
-            printf("RESULT %s %d %d\n", dernier_coup_joue, partie.scores[0], partie.scores[1]);
-            fflush(stdout);
+            char result_msg[64];
+            sprintf(result_msg, "RESULT %s %d %d", dernier_coup_joue, partie.scores[0], partie.scores[1]);
+            envoyer_result_avec_verification(result_msg);
             break;
         }
 
@@ -341,5 +377,87 @@ void formater_coup(int case_num, int couleur, int mode, char* output) {
     } else {
         output[0] = '\0';
     }
+}
+
+// ============================
+//   ENVOI AVEC VÉRIFICATION
+// ============================
+
+// Mode debug : mettre à 0 pour désactiver les logs stderr (évite blocage)
+#define DEBUG_MODE 0
+
+#if DEBUG_MODE
+    #define DEBUG_LOG(...) fprintf(stderr, __VA_ARGS__)
+#else
+    #define DEBUG_LOG(...) ((void)0)
+#endif
+
+// Vérifie que le buffer stdout a bien été vidé
+int verifier_buffer_stdout(void) {
+    int result = fflush(stdout);
+    return (result == 0);
+}
+
+// Envoie un coup avec vérification et retentatives si nécessaire
+int envoyer_coup_avec_verification(const char* coup) {
+    if (!coup || strlen(coup) == 0) {
+        return 0;
+    }
+
+    int tentative = 0;
+    int envoye = 0;
+
+    while (tentative < MAX_RETRIES && !envoye) {
+        tentative++;
+
+        // Envoyer le coup
+        int bytes_ecrits = fprintf(stdout, "%s\n", coup);
+        
+        if (bytes_ecrits <= 0) {
+            // Attendre avant de réessayer
+            #ifdef _WIN32
+                Sleep(RETRY_DELAY_US / 1000);  // Windows: millisecondes
+            #else
+                usleep(RETRY_DELAY_US);  // Unix: microsecondes
+            #endif
+            continue;
+        }
+
+        // Forcer le vidage du buffer
+        if (!verifier_buffer_stdout()) {
+            #ifdef _WIN32
+                Sleep(RETRY_DELAY_US / 1000);
+            #else
+                usleep(RETRY_DELAY_US);
+            #endif
+            continue;
+        }
+
+        // Vérification réussie
+        envoye = 1;
+        DEBUG_LOG("📤 Coup envoyé: %s (%d bytes)\n", coup, bytes_ecrits);
+    }
+
+    return envoye;
+}
+
+// Envoie un message RESULT avec vérification
+int envoyer_result_avec_verification(const char* message) {
+    if (!message || strlen(message) == 0) {
+        return 0;
+    }
+
+    int bytes_ecrits = fprintf(stdout, "%s\n", message);
+    
+    if (bytes_ecrits <= 0) {
+        return 0;
+    }
+
+    if (!verifier_buffer_stdout()) {
+        return 0;
+    }
+
+    DEBUG_LOG("📤 RESULT envoyé: %s\n", message);
+    return 1;
 }
 
