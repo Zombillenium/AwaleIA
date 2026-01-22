@@ -254,4 +254,12 @@ java Arbitre
 | **Parties longues (>200 coups)** | 3/5 | 5/5 |
 | **Parties courtes (<100 coups)** | 4/5 | 3/5 |
 
+### Auteurs 
+
+
+GOURIOU Vikram
+
+FUMET Léo
+
+
 
